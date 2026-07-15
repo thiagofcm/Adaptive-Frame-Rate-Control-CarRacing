@@ -1,0 +1,13 @@
+# Ignore all PyTorch model files
+*.pt
+
+# Ignore images
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# TensorBoard
+**/events.out.tfevents.*
+
+*.csv
