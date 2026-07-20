@@ -37,12 +37,16 @@ import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 import os
 from PIL import Image, ImageDraw, ImageFont
-from gymnasium.envs.box2d.car_racing import TRACK_WIDTH
+from gymnasium.envs.box2d.car_racing import TRACK_WIDTH, TRACK_TURN_RATE, PLAYFIELD
 
 SPEED_REF = 100.0     # ~ measured top speed of the controller
-TIME_REF  = 10.0      # seconds; time_to_curve horizon you care about
+TIME_REF  = 10.0      # seconds; time_to_curve / time_off_track horizon you care about
 
 SIM_FPS = 50
+CURVE_SEVERITY_TILES = 5   # how many track nodes ahead feature 1 sums curvature over
+OFF_TRACK_WHEEL_THRESHOLD = 2  # >=N of 4 wheels off road counts as "off track" for
+                                # the duration timer -- matches the reward penalty
+                                # threshold in envs/car_racing_var_fps.py
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -200,6 +204,8 @@ class CautiousVars:
         self.lookahead = lookahead
         self.search_window = search_window
         self.last_idx = 0
+        self.prev_cross_track = None   # None until the first get_cautious_var() call
+        self.off_track_ticks = 0.0     # consecutive ticks with >=OFF_TRACK_WHEEL_THRESHOLD wheels off
 
     def reset_track_reading(self, env):
         """
@@ -251,9 +257,16 @@ class CautiousVars:
         self.turn = turn
         self.seg_len = seg_len
         self.last_idx = 0
+        self.prev_cross_track = None
+        self.off_track_ticks = 0.0
         return self
 
-    def get_cautious_var(self, env):
+    def get_cautious_var(self, env, dt_ticks=1):
+        # dt_ticks: physics ticks elapsed since the previous call to this method --
+        # used to scale the rate-of-change and duration features so they're
+        # comparable across different chosen FPS rather than an artifact of how
+        # often the caller happens to sample. Pass 0 right after reset_track_reading()
+        # (no prior reading exists yet), and the actual elapsed tick count otherwise.
         # Car object
         car = env.unwrapped.car
         # Position x and y of the car
@@ -276,7 +289,7 @@ class CautiousVars:
         # It is obtained by computing the diff between current position (p)
         # and xy of the node of closest track. Then the dot product between
         # this difference and the normal vector of the track is computed.
-        # The Track normal is computed because 
+        # The Track normal is computed because
         # Positive and negative values indicate opposite sides of the centerline.
         cross_track = float((p - self.xy[closest_idx]) @ track_normal)
 
@@ -291,7 +304,8 @@ class CautiousVars:
         # ------------------- GETTING OFF TRACK WHEEL FLAGS -------------------------
         # Value is between 0 and 1. 0.25 means 1 wheel off track.
         # 0.0 means all the wheels on the track
-        off_track = sum(len(w.tiles) == 0 for w in car.wheels) / 4.0
+        off_track_wheel_count = sum(len(w.tiles) == 0 for w in car.wheels)
+        off_track = off_track_wheel_count / 4.0
 
         # ------------------- GETTING DISTANCE TO NEXT CURVE -------------------------
         N = len(self.xy)
@@ -310,8 +324,49 @@ class CautiousVars:
             if j == closest_idx:
                 break
 
-        # ------------------- GETTING DISTANCE TO NEXT CURVE -------------------------
+        # ------------------- TIME TO NEXT CURVE -------------------------
+        # Normalized by TIME_REF (10s horizon) instead of left raw -- unbounded when
+        # speed->0 (a near-stalled car could otherwise spike this to ~lookahead/1e-3).
         time_to_curve = dist_to_curve / max(speed, 1e-3)
+        time_to_curve_norm = np.clip(time_to_curve / TIME_REF, 0, 1)
+
+        # ------------------- FEATURE 1: CURVE SEVERITY, NEXT N TILES -------------------------
+        # Sum of |heading-change| over the next CURVE_SEVERITY_TILES track nodes ahead of
+        # the car -- a severity/slope signal, distinct from dist_to_curve/time_to_curve
+        # which only say *how far* the next curve is, not *how sharp* it is.
+        next_idxs = [(closest_idx + k) % N for k in range(1, CURVE_SEVERITY_TILES + 1)]
+        curve_severity = float(np.sum(self.turn[next_idxs]))
+        # Normalize by the theoretical max total turn over that many segments.
+        curve_severity_norm = np.clip(curve_severity / (CURVE_SEVERITY_TILES * TRACK_TURN_RATE), 0, 1)
+
+        # ------------------- FEATURE 2: RATE OF CHANGE OF CROSS-TRACK ERROR -------------------------
+        # Anticipatory drift signal (vs. the reactive off_track flag): how fast the car
+        # is moving laterally away from/toward the centerline, in track-widths/second.
+        if self.prev_cross_track is None or dt_ticks <= 0:
+            cross_track_rate_norm = 0.0
+        else:
+            dt_seconds = dt_ticks / SIM_FPS
+            cross_track_rate = (cross_track - self.prev_cross_track) / dt_seconds / TRACK_WIDTH
+            cross_track_rate_norm = np.clip(cross_track_rate, -5, 5) / 5
+        self.prev_cross_track = cross_track
+
+        # ------------------- FEATURE 3: HEADING VS TRACK-DIRECTION ANGLE -------------------------
+        # Angular difference between the car's current heading and the track's
+        # direction at the nearest node -- flags "a correction is coming" before
+        # cross-track error actually accumulates.
+        heading_diff = car.hull.angle - track_heading
+        heading_diff = (heading_diff + np.pi) % (2 * np.pi) - np.pi  # wrap to (-pi, pi]
+        heading_diff_norm = heading_diff / np.pi
+
+        # ------------------- FEATURE 4: TIME OUTSIDE TRACK -------------------------
+        # Duration (not the existing off_track boolean/fraction) that the car has been
+        # continuously off-track, using the same >=OFF_TRACK_WHEEL_THRESHOLD wheels-off
+        # threshold as the reward penalty in envs/car_racing_var_fps.py.
+        if off_track_wheel_count >= OFF_TRACK_WHEEL_THRESHOLD:
+            self.off_track_ticks += dt_ticks
+        else:
+            self.off_track_ticks = 0.0
+        time_off_track_norm = np.clip((self.off_track_ticks / SIM_FPS) / TIME_REF, 0, 1)
 
         # return {
         #     "speed":         speed,           # world-units / s
@@ -324,14 +379,18 @@ class CautiousVars:
         # }
 
         return np.array([
-            p[0],            # x
-            p[1],            # y
+            np.clip(p[0] / PLAYFIELD, -1, 1),  # x, normalized by the world boundary
+            np.clip(p[1] / PLAYFIELD, -1, 1),  # y
             v[0]/SPEED_REF,  # vx
             v[1]/SPEED_REF,  # vy
             np.clip(dist_to_curve / self.lookahead, 0, 1), # dist_to_curve -> [0,1],
-            time_to_curve,
+            time_to_curve_norm,
             np.clip(cross_track / TRACK_WIDTH, -2, 2) / 2,
             off_track,
+            curve_severity_norm,     # feature 1
+            cross_track_rate_norm,   # feature 2
+            heading_diff_norm,       # feature 3
+            time_off_track_norm,     # feature 4
         ], dtype=np.float32)
 
     def _nearest_idx(self, p):
@@ -428,8 +487,9 @@ def main():
             action, _, _, _ = agent.get_action_and_value(last_sampled_obs, deterministic=True)
 
         obs, r, term, trunc, _ = env.step(action.item())
-        c = cv.get_cautious_var(env)
-        x_n, y_n, vx_n, vy_n, dist_n, time_n, cross_n, off_n = c
+        c = cv.get_cautious_var(env, dt_ticks=1)
+        (x_n, y_n, vx_n, vy_n, dist_n, time_n, cross_n, off_n,
+         severity_n, cross_rate_n, heading_n, time_off_n) = c
 
         log.append((x_n, y_n, vx_n, vy_n, dist_n, time_n, cross_n, off_n))
 
@@ -437,7 +497,9 @@ def main():
               f"Frames Consumed: {total_frame_counter} - X: {x}, Y: {y}, Action:{action}")
         print(f"x: {x_n}, y: {y_n}, vx: {vx_n}, vy: {vy_n}, "
               f"dist_to_curve: {dist_n}, time_to_curve: {time_n}, "
-              f"cross_track: {cross_n}, off_track: {off_n}")
+              f"cross_track: {cross_n}, off_track: {off_n}, "
+              f"curve_severity: {severity_n}, cross_track_rate: {cross_rate_n}, "
+              f"heading_diff: {heading_n}, time_off_track: {time_off_n}")
         
         if args.save_video:
             frames.append(env.unwrapped.render())   # raw 96x96 RGB

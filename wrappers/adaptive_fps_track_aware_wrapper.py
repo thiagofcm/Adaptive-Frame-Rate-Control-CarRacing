@@ -5,6 +5,7 @@ from gymnasium import error, spaces
 from gymnasium.envs.box2d.car_racing import FPS
 import numpy as np
 import hashlib
+from utils.cautious_variables import CautiousVars
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -30,28 +31,27 @@ class NavAgentCNN(nn.Module):
 
 class NavModel:
     """Frozen CarRacing nav controller (CleanRL CNN agent) with a predict() interface."""
-    def __init__(self, model_path, n_actions=5, device="cpu"):
+    def __init__(self, model_path, device, n_actions=5):
         self.device = device
         checkpoint = torch.load(model_path, map_location=device)
-        sd = checkpoint.get("agent_state_dict", checkpoint)
-        #print(list(sd.keys())[:6])
-        self.agent = NavAgentCNN(n_actions).to(device)
-
-        if "model_state_dict" in checkpoint:
-            self.agent.load_state_dict(checkpoint["model_state_dict"])
-        else:
-            self.agent.load_state_dict(checkpoint)
+        sd = checkpoint.get("agent_state_dict", checkpoint)   # handles both formats
+        self.agent = NavAgentCNN(n_actions).to(self.device)
+        self.agent.load_state_dict(sd)                          # use sd, not checkpoint
         self.agent.eval()
+        print(f"Navigation Model loaded on {device}")
     
     def predict(self, obs, deterministic=True):
         # obs is the raw (4,96,96) image stack
         obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
         with torch.no_grad():
             logits = self.agent.actor(self.agent.network(obs_t / 255.0))
+        if deterministic:
             action = logits.argmax(dim=-1)
+        else:
+            action = torch.distributions.Categorical(logits=logits).sample()
         return action.cpu().numpy()[0], None
-
-class HighestFPSWrapper(gym.Wrapper):
+    
+class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
     def __init__(self, env, nav_model_path, device, frame_cost=0.0, budget=50):
         super().__init__(env)
 
@@ -61,19 +61,19 @@ class HighestFPSWrapper(gym.Wrapper):
         self.budget = budget
         self.fps_choices = [1,5,10,25,50]
         self.action_space = spaces.Discrete(len(self.fps_choices))
-        self.device= device
 
-        # Observation space adaptations
-        self.image_shape = env.observation_space.shape              # (4, 96, 96)
-        self.n_image     = int(np.prod(self.image_shape))           # 36864
-        self.n_scalars   = 2
-        self.observation_space = env.observation_space 
         # Navigation Controller
         if nav_model_path is not None:
-            self.navigation_model = NavModel(nav_model_path)
+            self.navigation_model = NavModel(nav_model_path, device)
         else:
             self.navigation_model = None 
         self.navigation_action_space = spaces.Discrete(4)
+
+        # Cautious Variables Class
+        self.cautious_sensors = CautiousVars()
+        self.n_cautious = 12  # 8 original + curve_severity, cross_track_rate, heading_diff, time_off_track
+        self.n_scalars = 3
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.n_cautious + self.n_scalars,), dtype=np.float32)
 
         # Variable Framerate Variables:
         self.world_step_count = 0
@@ -88,7 +88,7 @@ class HighestFPSWrapper(gym.Wrapper):
         observed_frame, info = self.env.reset(seed=seed, options=options)
         track = np.asarray(self.env.unwrapped.track, dtype=np.float32)
         #track_hash = hash(track.tobytes())
-        #track_hash =  hashlib.md5(track.tobytes()).hexdigest()
+        track_hash =  hashlib.md5(track.tobytes()).hexdigest()
         #print(f"[reset] seed={seed}  track_hash={track_hash}  track_len={len(track)}")
 
         self.world_step_count = 0
@@ -101,18 +101,26 @@ class HighestFPSWrapper(gym.Wrapper):
         self.reached_goal = False
         self.budget_pen_check = False
 
-        # # Goal Settings:
-        # self.goal_frac   = 0.95
-        # self.goal_xy     = track[int(self.goal_frac * len(track)), 2:4]
-        # self.goal_radius = 20.0
-        # self.min_steps   = 20
+        # Goal Settings:
+        self.goal_frac   = 0.95
+        self.goal_xy     = track[int(self.goal_frac * len(track)), 2:4]
+        self.goal_radius = 20.0
+        self.min_steps   = 20
 
+        # Frames
         self.last_sampled_obs = observed_frame                      # raw (4,96,96) image for the controller
-        self.current_obs = self.last_sampled_obs  # augmented (36866,) for the FPS policy
+       
+        # Cautious Variables
+        self.cautious_sensors.reset_track_reading(self.env)
+        # dt_ticks=0: first reading of the episode, no prior tick to diff/accumulate against
+        self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(self.env, dt_ticks=0)
+
+        # Current obs here is the cautious var (12-dim) + 3 scalars
+        self.current_obs = self._get_augmented_obs(self.last_sampled_cautious_obs)  # augmented (36866,) for the FPS policy
         return self.current_obs, info
   
-    def _get_augmented_obs(self, observed_frame):
-        flat_img = observed_frame.astype(np.float32).reshape(-1)  
+    def _get_augmented_obs(self, obs):
+        cautious_obs = obs
         obs_age_steps = self.steps_since_last_obs
         # normalizing the num of steps since last obs
         obs_age_ratio = obs_age_steps / self.simulation_fps
@@ -120,15 +128,9 @@ class HighestFPSWrapper(gym.Wrapper):
         fps_ratio = self.current_fps/self.simulation_fps
 
         aug_obs = np.concatenate([
-            flat_img.astype(np.float32),
-            np.array([obs_age_ratio,fps_ratio], dtype=np.float32)])
-
+            cautious_obs,
+            np.array([obs_age_ratio,fps_ratio, self.episode_frame_count], dtype=np.float32)])
         return aug_obs
-
-    def _get_debug_obs(self, frame_consumed):
-        obs_age_ratio = self.steps_since_last_obs / self.simulation_fps
-        fps_ratio     = self.current_fps / self.simulation_fps
-        return np.array([float(frame_consumed), obs_age_ratio, fps_ratio], dtype=np.float32)
 
     def step(self, fps_action):
         assert self.navigation_model is not None, \
@@ -149,15 +151,21 @@ class HighestFPSWrapper(gym.Wrapper):
         observed_frame, nav_reward, terminated, truncated, info = self.env.step(navigation_action)
 
         # 3. Testing reaching goal condition
-        # x, y = self.env.unwrapped.car.hull.position
-        # self.reached_goal = (np.hypot(x - self.goal_xy[0], y - self.goal_xy[1]) < self.goal_radius) \
-        #            and (self.world_step_count > self.min_steps)
+        x, y = self.env.unwrapped.car.hull.position
+        self.reached_goal = (np.hypot(x - self.goal_xy[0], y - self.goal_xy[1]) < self.goal_radius) \
+                   and (self.world_step_count > self.min_steps)
 
         # 4. Check if it's time to sample a new observation based on the obs_interval
         # If so, update the last sampled observation, reset the steps since last observation count, and increment the episode frame count
         if self.steps_since_last_obs >= self.obs_interval:
             # self.current_obs is updated every physics step, so here we store the fresh observation of this step
             self.last_sampled_obs = observed_frame.copy()
+            # dt_ticks = ticks elapsed since the last sample, captured before it's reset below --
+            # scales the cross-track-rate and time-off-track features correctly regardless of
+            # which FPS was chosen for the window that just elapsed.
+            self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(
+                self.env, dt_ticks=self.steps_since_last_obs
+            )
             self.steps_since_last_obs = 0
             self.episode_frame_count += 1
             frame_consumed = True
@@ -177,23 +185,29 @@ class HighestFPSWrapper(gym.Wrapper):
             # Debbuging mask, which indicates which values in the observation are valid (1 for valid, 0 for invalid)
             #obs_mask = np.zeros_like(self.last_sampled_obs, dtype=np.float32)
 
-        # 5. Get current obs
-        self.current_obs = self.last_sampled_obs
-
-        # DEBBUGING: store the observation mask in a separate buffer for analysis
-        #img_sum = float(self.current_obs[:self.n_image].sum())
-        #debug_obs = self._get_debug_obs(frame_consumed)
-        #debug_obs = self._get_debug_obs(img_sum)
-        #print(f"[Adaptive FPS Wrapper] Step: {self.world_step_count}, Obs: {debug_obs}, Action: {self.current_fps}")
-
-        reward = nav_reward #+ 0.05 * (self.current_fps/self.simulation_fps)
-        # print("[Adaptive FPS Wrapper] Step: {}, Reward: {}, Nav Reward: {}, Current FPS: {}, Frame Cost: {}, Budget: {}".format(
-        #     self.world_step_count, reward, nav_reward, self.current_fps, self.frame_cost, self.budget))
-        #print(f"Nav Rew on Highest FPS Wrapper: {reward}")
+        # 5. Concatenate the cautious-var vector with the additional scalars (age ratio, fps ratio, episode frame count)
+        # Current obs here is the cautious var (12-dim) + 3 scalars
+        self.current_obs = self._get_augmented_obs(self.last_sampled_cautious_obs)
         
-        # if self.reached_goal:
-        #     terminated = True
-        #     #reward = 150
+        # 6. Compute reward based on the navigation reward obtained from the physics step, and apply a penalty if a new frame was consumed
+        frame_penalty = self.frame_cost if frame_consumed else 0.0
+        reward = nav_reward - frame_penalty
+        
+        # DEBBUGING: Cumulate the fps penalty for the episode, which can be used for analysis and debugging
+        self.fps_penalty += frame_penalty
+
+        # DEBBUGING:
+        np.set_printoptions(suppress=True, precision=4)
+        #print(f"[AdaptiveC FPS Wrapper] Step: {self.world_step_count}, Obs: {self.current_obs}, Action: {self.current_fps}")
+        #print(f"[AdaptiveC FPS Wrapper] Step: {self.world_step_count}, Obs: {self.current_obs}, Action: {self.current_fps}")
+
+        if not self.reached_goal and self.episode_frame_count > self.budget and not self.budget_pen_check:
+            reward = -100
+            self.budget_pen_check = True
+
+        if self.reached_goal:
+            terminated = True
+            reward = 150
 
         info = dict(info)
         info["reward"] = reward

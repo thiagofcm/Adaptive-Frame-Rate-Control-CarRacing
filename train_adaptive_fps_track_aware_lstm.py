@@ -25,7 +25,8 @@ from torch.utils.tensorboard import SummaryWriter
 from gymnasium.wrappers import TimeLimit
 from datetime import datetime
 from wrappers.pre_processing import CarRacingPreprocessing
-from wrappers.adaptive_fps_cautious_wrapper_ep_counter import AdaptiveFPS_Cautious_Wrapper_Ep
+from wrappers.adaptive_fps_track_aware_wrapper import AdaptiveFPS_TrackAware_Wrapper
+import envs.car_racing_var_fps  # noqa: F401 -- import needed to register "CarRacing_VarFramerate"
 
 @dataclass
 class Args:
@@ -47,8 +48,9 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
     # Algorithm specific arguments
-    env_id: str = "CarRacing-v3"
-    """the id of the environment"""
+    env_id: str = "CarRacing_VarFramerate"
+    """the id of the environment -- CarRacing_VarFramerate (envs/car_racing_var_fps.py) rather
+    than stock CarRacing-v3, since that's where the off-track reward penalty now lives"""
     total_timesteps: int = 15_000_000
     """total timesteps of the experiments"""
     learning_rate: float = 1e-4
@@ -106,7 +108,7 @@ def make_env(env_id, nav_model_path, frame_cost, budget, max_episode_steps, devi
     def thunk():
         env = gym.make(env_id, continuous=False, render_mode="rgb_array")
         env = CarRacingPreprocessing(env, skip_frames=4, stack_frames=4)
-        env = AdaptiveFPS_Cautious_Wrapper_Ep(env, nav_model_path, device, frame_cost, budget)
+        env = AdaptiveFPS_TrackAware_Wrapper(env, nav_model_path, device, frame_cost, budget)
         env = TimeLimit(env, max_episode_steps=max_episode_steps)
         # RecordEpisodeStatistics must wrap everything above -- it sums whatever reward
         # stream it wraps, and episodic_return should reflect the actual trained-on reward
@@ -222,7 +224,7 @@ if __name__ == "__main__":
 
     date_str = datetime.now().strftime("%d-%m-%H-%M-%S")
     run_name = f"{args.env_id}_fc_{args.frame_cost}_bud_{args.budget}_{date_str}"
-    run_dir = f"experiments/adaptive_fps_cautious_ep_counter/runs/{run_name}"
+    run_dir = f"runs/adaptive_fps_track_aware_lstm/{run_name}"
 
     if args.track:
         import wandb

@@ -11,7 +11,7 @@ matplotlib.use("Agg")          # headless cluster: no display, must set before p
 import matplotlib.pyplot as plt
 
 # Reuse classes from your training script
-from experiments.navigation.train_nav import Agent, CarRacingPreprocessing, image_preprocessing
+from old.experiments.navigation.train_nav import Agent, CarRacingPreprocessing, image_preprocessing
 
 SIM_FPS = 50
 

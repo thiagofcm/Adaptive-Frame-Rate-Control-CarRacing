@@ -5,7 +5,7 @@ import argparse
 import numpy as np
 import torch
 import gymnasium as gym
-from experiments.navigation.train_nav import Agent, CarRacingPreprocessing
+from old.experiments.navigation.train_nav import Agent, CarRacingPreprocessing
 import csv 
 
 SIM_FPS = 50

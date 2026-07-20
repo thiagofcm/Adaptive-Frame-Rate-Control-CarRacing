@@ -13,7 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib.lines import Line2D
-from experiments.highest_fps_cautious.train_highest import Agent
+from old.experiments.highest_fps_cautious.train_highest import Agent
 from wrappers.pre_processing import CarRacingPreprocessing
 from wrappers.highest_fps_cautious import HighestFPS_Cautious_Wrapper
 from PIL import Image, ImageDraw, ImageFont

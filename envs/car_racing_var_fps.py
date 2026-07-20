@@ -537,7 +537,7 @@ class CarRacing_VarFramerate(CarRacing):
         return self.step(None)[0], {}
 
     def step(self, action: np.ndarray | int):
-        print("YOU ARE USING CAR RACING VAR FPS ENV")
+        #print("YOU ARE USING CAR RACING VAR FPS ENV")
         assert self.car is not None
         if action is not None:
             if self.continuous:
@@ -570,6 +570,15 @@ class CarRacing_VarFramerate(CarRacing):
             # We actually don't want to count fuel spent, we want car to be faster.
             # self.reward -=  10 * self.car.fuel_spent / ENGINE_POWER
             self.car.fuel_spent = 0.0
+
+            # Off-track penalty: fires once >=3 of 4 wheels have lost contact with
+            # the road (matches the "time outside track" threshold in CautiousVars),
+            # applied per physics tick on top of the existing -0.1/tick baseline --
+            # an off-track tick costs -0.2 total instead of a separately-scaled term.
+            off_track_wheels = sum(len(w.tiles) == 0 for w in self.car.wheels)
+            if off_track_wheels >= 3:
+                self.reward -= 0.1
+
             step_reward = self.reward - self.prev_reward
             self.prev_reward = self.reward
             if self.tile_visited_count == len(self.track) or self.new_lap:
