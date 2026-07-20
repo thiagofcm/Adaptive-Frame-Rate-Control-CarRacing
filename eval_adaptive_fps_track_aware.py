@@ -44,11 +44,12 @@ from train_adaptive_fps_track_aware_lstm import Agent as AdaptiveAgent
 FPS_CHOICES = [1, 5, 10, 25, 50]
 NAV_MODEL_PATH = "old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt"
 
-# Must match the 12-dim layout returned by CautiousVars.get_cautious_var()
+# Must match the 13-dim layout returned by CautiousVars.get_cautious_var()
 CAUTIOUS_LABELS = [
-    "x", "y", "vx", "vy", "dist_to_curve", "time_to_curve",
+    "vx", "vy", "dist_to_curve", "time_to_curve",
     "cross_track", "off_track", "curve_severity", "cross_track_rate",
-    "heading_diff", "time_off_track",
+    "heading_alignment", "time_off_track", "frame_counter", "episode_completion",
+    "curves_passed",
 ]
 
 
@@ -67,7 +68,7 @@ def make_eval_env(env_id, nav_model_path, frame_cost, budget, max_episode_steps)
 
 def load_adaptive_agent(ckpt_path, device):
     class _Dummy:
-        single_observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(15,), dtype=np.float32)
+        single_observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(16,), dtype=np.float32)
         single_action_space = gym.spaces.Discrete(len(FPS_CHOICES))
     agent = AdaptiveAgent(_Dummy()).to(device)
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
@@ -157,7 +158,7 @@ def main():
     p.add_argument("--nav-model-path", default=NAV_MODEL_PATH)
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--frame-cost", type=float, default=0.0)
-    p.add_argument("--budget", type=float, default=10_000.0)
+    p.add_argument("--budget", type=float, default=150)
     p.add_argument("--max-episode-steps", type=int, default=1000)
     p.add_argument("--out-dir", default="eval_adaptive_fps_track_aware")
     p.add_argument("--save-video", action="store_true")
@@ -225,7 +226,7 @@ def main():
 
         if args.display or args.save_video:
             frame = env.unwrapped.render()
-            annotated = draw_cautious_overlay(frame, ep_len, chosen, fresh, obs[:12], ep_return)
+            annotated = draw_cautious_overlay(frame, ep_len, chosen, fresh, obs[:13], ep_return)
             if args.save_video:
                 frames.append(annotated)
             if args.display:

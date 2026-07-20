@@ -70,8 +70,12 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
         self.navigation_action_space = spaces.Discrete(4)
 
         # Cautious Variables Class
-        self.cautious_sensors = CautiousVars()
-        self.n_cautious = 12  # 8 original + curve_severity, cross_track_rate, heading_diff, time_off_track
+        self.cautious_sensors = CautiousVars(budget=budget)
+        # vx, vy, dist_to_curve, time_to_curve, cross_track, off_track, curve_severity,
+        # cross_track_rate, heading_alignment, time_off_track, frame_counter,
+        # episode_completion, curves_passed -- see utils/cautious_variables.py:get_cautious_var().
+        # No raw (x, y) position.
+        self.n_cautious = 13
         self.n_scalars = 3
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.n_cautious + self.n_scalars,), dtype=np.float32)
 
@@ -113,7 +117,9 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
         # Cautious Variables
         self.cautious_sensors.reset_track_reading(self.env)
         # dt_ticks=0: first reading of the episode, no prior tick to diff/accumulate against
-        self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(self.env, dt_ticks=0)
+        self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(
+            self.env, dt_ticks=0, episode_frame_count=self.episode_frame_count
+        )
 
         # Current obs here is the cautious var (12-dim) + 3 scalars
         self.current_obs = self._get_augmented_obs(self.last_sampled_cautious_obs)  # augmented (36866,) for the FPS policy
@@ -163,11 +169,14 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
             # dt_ticks = ticks elapsed since the last sample, captured before it's reset below --
             # scales the cross-track-rate and time-off-track features correctly regardless of
             # which FPS was chosen for the window that just elapsed.
-            self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(
-                self.env, dt_ticks=self.steps_since_last_obs
-            )
+            dt_ticks = self.steps_since_last_obs
             self.steps_since_last_obs = 0
             self.episode_frame_count += 1
+            # episode_frame_count passed post-increment, so frame_counter reflects the
+            # same count the budget-overrun check below will actually compare to budget.
+            self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(
+                self.env, dt_ticks=dt_ticks, episode_frame_count=self.episode_frame_count
+            )
             frame_consumed = True
 
             # Update FPS and obs_interval based on the action taken by the agent

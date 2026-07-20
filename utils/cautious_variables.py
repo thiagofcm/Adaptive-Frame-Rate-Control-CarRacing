@@ -37,16 +37,17 @@ import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 import os
 from PIL import Image, ImageDraw, ImageFont
-from gymnasium.envs.box2d.car_racing import TRACK_WIDTH, TRACK_TURN_RATE, PLAYFIELD
+from gymnasium.envs.box2d.car_racing import TRACK_WIDTH, TRACK_TURN_RATE
 
 SPEED_REF = 100.0     # ~ measured top speed of the controller
 TIME_REF  = 10.0      # seconds; time_to_curve / time_off_track horizon you care about
 
 SIM_FPS = 50
-CURVE_SEVERITY_TILES = 5   # how many track nodes ahead feature 1 sums curvature over
+CURVE_SEVERITY_TILES = 10   # how many track nodes ahead feature 1 sums curvature over
 OFF_TRACK_WHEEL_THRESHOLD = 2  # >=N of 4 wheels off road counts as "off track" for
                                 # the duration timer -- matches the reward penalty
                                 # threshold in envs/car_racing_var_fps.py
+DECAY_CONST = 2.0   # decay constant for weighting curvature over lookahead tiles
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -144,8 +145,6 @@ def draw_debug_text(frame, debug_dict, step_counter):
 
     text_lines = [
         f"Frame: {step_counter}",
-        f"x: {debug_dict['x']:.3f}",
-        f"y: {debug_dict['y']:.3f}",
         f"vx: {debug_dict['vx']:.3f}",
         f"vy: {debug_dict['vy']:.3f}",
         f"dist_to_curve: {debug_dict['dist_to_curve']:.3f}",
@@ -196,13 +195,17 @@ class Agent(nn.Module):
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
 class CautiousVars:
-    def __init__(self, curve_thresh=0.04, lookahead=300.0, search_window=25):
+    def __init__(self, curve_thresh=0.04, lookahead=300.0, search_window=25, budget=100):
         # curve_thresh : |curvature| (rad/world-unit) above which a node = "a curve"
         # lookahead    : how far ahead to scan for the next curve (caps dist_to_curve)
         # search_window: +/- nodes around last index to search for the nearest node
+        # budget       : same decision budget the wrapper penalizes against -- normalizes
+        #                the frame_counter feature so it reaches 1.0 exactly when the
+        #                budget-overrun penalty is about to fire, not an arbitrary horizon
         self.curve_thresh = curve_thresh
         self.lookahead = lookahead
         self.search_window = search_window
+        self.budget = budget
         self.last_idx = 0
         self.prev_cross_track = None   # None until the first get_cautious_var() call
         self.off_track_ticks = 0.0     # consecutive ticks with >=OFF_TRACK_WHEEL_THRESHOLD wheels off
@@ -261,12 +264,16 @@ class CautiousVars:
         self.off_track_ticks = 0.0
         return self
 
-    def get_cautious_var(self, env, dt_ticks=1):
+    def get_cautious_var(self, env, dt_ticks=1, episode_frame_count=1):
         # dt_ticks: physics ticks elapsed since the previous call to this method --
         # used to scale the rate-of-change and duration features so they're
         # comparable across different chosen FPS rather than an artifact of how
         # often the caller happens to sample. Pass 0 right after reset_track_reading()
         # (no prior reading exists yet), and the actual elapsed tick count otherwise.
+        # episode_frame_count: the wrapper's own decision counter (same one compared
+        # against `budget` for the overrun penalty) -- passed in rather than tracked
+        # independently here, so this can never drift out of sync with the value the
+        # reward is actually computed from.
         # Car object
         car = env.unwrapped.car
         # Position x and y of the car
@@ -334,10 +341,15 @@ class CautiousVars:
         # Sum of |heading-change| over the next CURVE_SEVERITY_TILES track nodes ahead of
         # the car -- a severity/slope signal, distinct from dist_to_curve/time_to_curve
         # which only say *how far* the next curve is, not *how sharp* it is.
+        # next_idxs = [(closest_idx + k) % N for k in range(1, CURVE_SEVERITY_TILES + 1)]
+        # curve_severity = float(np.sum(self.turn[next_idxs]))
+        # # Normalize by the theoretical max total turn over that many segments.
+        # curve_severity_norm = np.clip(curve_severity / (CURVE_SEVERITY_TILES * TRACK_TURN_RATE), 0, 1)
+
         next_idxs = [(closest_idx + k) % N for k in range(1, CURVE_SEVERITY_TILES + 1)]
-        curve_severity = float(np.sum(self.turn[next_idxs]))
-        # Normalize by the theoretical max total turn over that many segments.
-        curve_severity_norm = np.clip(curve_severity / (CURVE_SEVERITY_TILES * TRACK_TURN_RATE), 0, 1)
+        weights = np.exp(-np.arange(1, CURVE_SEVERITY_TILES + 1) / DECAY_CONST)
+        curve_severity = float(np.sum(self.turn[next_idxs] * weights))
+        curve_severity_norm = np.clip(curve_severity / (weights.sum() * TRACK_TURN_RATE), 0, 1)
 
         # ------------------- FEATURE 2: RATE OF CHANGE OF CROSS-TRACK ERROR -------------------------
         # Anticipatory drift signal (vs. the reactive off_track flag): how fast the car
@@ -347,16 +359,30 @@ class CautiousVars:
         else:
             dt_seconds = dt_ticks / SIM_FPS
             cross_track_rate = (cross_track - self.prev_cross_track) / dt_seconds / TRACK_WIDTH
-            cross_track_rate_norm = np.clip(cross_track_rate, -5, 5) / 5
+            # +-10 track-widths/sec calibrated empirically (5-seed frozen-controller
+            # rollout at 50fps): the old +-5 bound saturated 32.7% of real samples;
+            # +-10 saturates 9.8% while keeping the median sample at a meaningful 0.33
+            # rather than compressed near zero (see conversation/PR notes for the table).
+            cross_track_rate_norm = np.clip(cross_track_rate, -10, 10) / 10
         self.prev_cross_track = cross_track
 
-        # ------------------- FEATURE 3: HEADING VS TRACK-DIRECTION ANGLE -------------------------
-        # Angular difference between the car's current heading and the track's
-        # direction at the nearest node -- flags "a correction is coming" before
-        # cross-track error actually accumulates.
-        heading_diff = car.hull.angle - track_heading
-        heading_diff = (heading_diff + np.pi) % (2 * np.pi) - np.pi  # wrap to (-pi, pi]
-        heading_diff_norm = heading_diff / np.pi
+        # ------------------- FEATURE 3: HEADING ALIGNMENT WITH TRACK DIRECTION -------------------------
+        # cos(angle between car heading and track direction): +1 = perfectly aligned
+        # with the track, 0 = perpendicular (mid-turn), -1 = pointed exactly backward.
+        # Smooth gradient signal rather than a raw wrapped angle -- "right direction"
+        # reads as positive, "driving backward" reads as negative, with no discontinuity
+        # at the +-pi wraparound (cosine is periodic, so no explicit wrap needed).
+        #
+        # car.hull.angle is in the track generator's "beta" frame, which is rotated
+        # -90deg from the car's true direction of travel (verified empirically: track
+        # position advances along (-sin(beta), cos(beta)), i.e. true heading = beta+90deg;
+        # car.hull.angle spawns equal to beta directly). self.heading (this class's own
+        # xy-tangent-based array) is already in the *true* frame, so hull.angle needs the
+        # +pi/2 correction here before comparing -- NOT needed in the env's own
+        # wrong-direction check, which instead compares hull.angle against raw track
+        # beta (both already in the same beta frame, so that offset cancels there).
+        heading_diff = (car.hull.angle + np.pi / 2) - track_heading
+        heading_alignment = float(np.cos(heading_diff))
 
         # ------------------- FEATURE 4: TIME OUTSIDE TRACK -------------------------
         # Duration (not the existing off_track boolean/fraction) that the car has been
@@ -367,6 +393,28 @@ class CautiousVars:
         else:
             self.off_track_ticks = 0.0
         time_off_track_norm = np.clip((self.off_track_ticks / SIM_FPS) / TIME_REF, 0, 1)
+
+        # ------------------- FEATURE 5: FRAME COUNTER -------------------------
+        # How many decisions have been spent out of the wrapper's own `budget` --
+        # a clean 0->1 ramp that hits 1.0 exactly when the budget-overrun penalty
+        # is about to fire, rather than an arbitrary fixed-tick horizon.
+        frame_counter_norm = np.clip(episode_frame_count / self.budget, 0, 1)
+
+        # ------------------- FEATURE 6: EPISODE COMPLETION -------------------------
+        # Fraction of distinct track tiles visited so far this episode -- reuses the
+        # env's own tile_visited_count (incremented once per tile, first contact only;
+        # see FrictionDetector in envs/car_racing_var_fps.py), not reimplemented here.
+        episode_completion = np.clip(env.unwrapped.tile_visited_count / N, 0, 1)
+
+        # ------------------- FEATURE 7: CURVES PASSED -------------------------
+        # Fraction of this track's curve regions navigated cleanly so far (no
+        # off-track/wrong-direction event while inside one) -- both the count and
+        # its normalizer come straight from the env (curves_passed_count,
+        # total_curves_on_track; see CarRacing_VarFramerate.step()/reset()), so this
+        # can't drift out of sync with the curve-passed reward bonus it mirrors.
+        curves_passed_norm = np.clip(
+            env.unwrapped.curves_passed_count / env.unwrapped.total_curves_on_track, 0, 1
+        )
 
         # return {
         #     "speed":         speed,           # world-units / s
@@ -379,18 +427,19 @@ class CautiousVars:
         # }
 
         return np.array([
-            np.clip(p[0] / PLAYFIELD, -1, 1),  # x, normalized by the world boundary
-            np.clip(p[1] / PLAYFIELD, -1, 1),  # y
             v[0]/SPEED_REF,  # vx
             v[1]/SPEED_REF,  # vy
             np.clip(dist_to_curve / self.lookahead, 0, 1), # dist_to_curve -> [0,1],
             time_to_curve_norm,
-            np.clip(cross_track / TRACK_WIDTH, -2, 2) / 2,
+            np.clip(cross_track / TRACK_WIDTH, -1, 1),  # -1/+1 = at the left/right track edge
             off_track,
             curve_severity_norm,     # feature 1
             cross_track_rate_norm,   # feature 2
-            heading_diff_norm,       # feature 3
+            heading_alignment,       # feature 3 (was heading_diff)
             time_off_track_norm,     # feature 4
+            frame_counter_norm,      # feature 5
+            episode_completion,      # feature 6
+            curves_passed_norm,      # feature 7
         ], dtype=np.float32)
 
     def _nearest_idx(self, p):
@@ -488,18 +537,20 @@ def main():
 
         obs, r, term, trunc, _ = env.step(action.item())
         c = cv.get_cautious_var(env, dt_ticks=1)
-        (x_n, y_n, vx_n, vy_n, dist_n, time_n, cross_n, off_n,
-         severity_n, cross_rate_n, heading_n, time_off_n) = c
+        (vx_n, vy_n, dist_n, time_n, cross_n, off_n,
+         severity_n, cross_rate_n, heading_n, time_off_n, frame_n, completion_n, curves_n) = c
 
-        log.append((x_n, y_n, vx_n, vy_n, dist_n, time_n, cross_n, off_n))
+        log.append((vx_n, vy_n, dist_n, time_n, cross_n, off_n))
 
         print(f" Step: {env.step_counter} - {obs_type} Observation - "
               f"Frames Consumed: {total_frame_counter} - X: {x}, Y: {y}, Action:{action}")
-        print(f"x: {x_n}, y: {y_n}, vx: {vx_n}, vy: {vy_n}, "
+        print(f"vx: {vx_n}, vy: {vy_n}, "
               f"dist_to_curve: {dist_n}, time_to_curve: {time_n}, "
               f"cross_track: {cross_n}, off_track: {off_n}, "
               f"curve_severity: {severity_n}, cross_track_rate: {cross_rate_n}, "
-              f"heading_diff: {heading_n}, time_off_track: {time_off_n}")
+              f"heading_alignment: {heading_n}, time_off_track: {time_off_n}, "
+              f"frame_counter: {frame_n}, episode_completion: {completion_n}, "
+              f"curves_passed: {curves_n}")
         
         if args.save_video:
             frames.append(env.unwrapped.render())   # raw 96x96 RGB
@@ -532,13 +583,11 @@ def main():
         annotated_frames = []
 
         for idx, (frame, vals) in enumerate(zip(frames, log)):
-            x_n, y_n, vx_n, vy_n, dist_n, time_n, cross_n, off_n = vals
+            vx_n, vy_n, dist_n, time_n, cross_n, off_n = vals
             annotated_frames.append(
                 draw_debug_text(
                     frame,
                     {
-                        "x": x_n,
-                        "y": y_n,
                         "vx": vx_n,
                         "vy": vy_n,
                         "dist_to_curve": dist_n,

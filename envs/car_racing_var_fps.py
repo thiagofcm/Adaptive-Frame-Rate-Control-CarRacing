@@ -56,6 +56,31 @@ MAX_SHAPE_DIM = (
     max(GRASS_DIM, TRACK_WIDTH, TRACK_DETAIL_STEP) * math.sqrt(2) * ZOOM * SCALE
 )
 
+# cos(car heading - track direction at the current tile): +1 aligned, -1 exactly
+# backward. Below this, the car counts as driving the wrong way round the track
+# (roughly >120 degrees misaligned) rather than just cornering hard, and the
+# episode is terminated instead of letting it keep racking up reward running
+# backward. Matches the alignment sign convention of the heading_alignment
+# cautious-variable feature in utils/cautious_variables.py.
+WRONG_DIRECTION_ALIGNMENT_THRESHOLD = -0.5
+
+# Terminate if the car sits below STATIC_SPEED_THRESHOLD (world-units/s -- same
+# "stalled" cutoff already used by plot_track_trajectory in utils/cautious_variables.py)
+# for more than STATIC_TIMEOUT_TICKS consecutive physics ticks, so a truly stuck car
+# doesn't just sit there accumulating negative reward for the rest of the episode.
+STATIC_SPEED_THRESHOLD = 1.0
+STATIC_TIMEOUT_TICKS = 100
+
+# Per-segment |beta[i+1]-beta[i]| angle threshold for "this tile is part of a curve" --
+# an independent, self-contained calibration from CautiousVars' curve_thresh (which is
+# a curvature RATE in rad/world-unit, not a raw per-segment angle), so the two are not
+# expected to draw region boundaries at exactly the same nodes.
+CURVE_TILE_TURN_THRESHOLD = 0.05
+# Reward bonus paid once, on cleanly exiting a curve region (no off-track/wrong-direction
+# event while inside it) -- comparable to a handful of tiles' worth of +1000/N progress
+# reward, without dominating it or the -100 terminal penalties.
+CURVE_PASSED_BONUS = 10.0
+
 class FrictionDetector(contactListener):
     def __init__(self, env, lap_complete_percent):
         contactListener.__init__(self)
@@ -494,6 +519,31 @@ class CarRacing_VarFramerate(CarRacing):
         self.track = track
         return True
 
+    def _is_curve_tile(self, idx):
+        """Whether track node `idx` sits inside a curve, from the raw per-segment
+        beta change (self.track[i][1] is already the steering-integrator angle used
+        to build the track, so consecutive betas directly encode the turn there)."""
+        N = len(self.track)
+        beta_here = self.track[idx][1]
+        beta_next = self.track[(idx + 1) % N][1]
+        dh = beta_next - beta_here
+        dh = (dh + math.pi) % (2 * math.pi) - math.pi
+        return abs(dh) > CURVE_TILE_TURN_THRESHOLD
+
+    def _count_curve_regions(self):
+        """One-time scan (called from reset(), after the track exists) counting how
+        many separate curve regions the full lap has -- the denominator for the
+        curves_passed observation feature in utils/cautious_variables.py."""
+        N = len(self.track)
+        count = 0
+        prev_is_curve = self._is_curve_tile(N - 1)
+        for i in range(N):
+            cur_is_curve = self._is_curve_tile(i)
+            if cur_is_curve and not prev_is_curve:
+                count += 1
+            prev_is_curve = cur_is_curve
+        return count
+
     def reset(
         self,
         *,
@@ -512,6 +562,10 @@ class CarRacing_VarFramerate(CarRacing):
         self.t = 0.0
         self.new_lap = False
         self.road_poly = []
+        self.static_ticks = 0  # consecutive ticks with speed < STATIC_SPEED_THRESHOLD
+        self.in_curve = False
+        self.curve_clean = True
+        self.curves_passed_count = 0
 
         if self.domain_randomize:
             randomize = True
@@ -531,6 +585,8 @@ class CarRacing_VarFramerate(CarRacing):
                     "instances of this message)"
                 )
         self.car = Car(self.world, *self.track[0][1:4])
+        self.total_curves_on_track = max(self._count_curve_regions(), 1)  # avoid /0
+        print(f"There are {self.total_curves_on_track} curves on the track.")
 
         if self.render_mode == "human":
             self.render()
@@ -589,6 +645,58 @@ class CarRacing_VarFramerate(CarRacing):
             if abs(x) > PLAYFIELD or abs(y) > PLAYFIELD:
                 terminated = True
                 info["lap_finished"] = False
+                step_reward = -100
+
+            # Wrong-direction termination: find the tile currently under any wheel
+            # (skip the check if fully off-track -- that's already penalized above,
+            # and there's no tile to read a direction from anyway).
+            current_tile_idx = None
+            for w in self.car.wheels:
+                if len(w.tiles) > 0:
+                    current_tile_idx = next(iter(w.tiles)).idx
+                    break
+            wrong_direction_now = False
+            if current_tile_idx is not None:
+                track_heading = self.track[current_tile_idx][1]  # beta
+                heading_alignment = math.cos(self.car.hull.angle - track_heading)
+                if heading_alignment < WRONG_DIRECTION_ALIGNMENT_THRESHOLD:
+                    terminated = True
+                    info["wrong_direction"] = True
+                    step_reward = -100
+                    wrong_direction_now = True
+
+            # Curves-passed tracking: entering/exiting a curve region (same tile
+            # lookup as above, skipped while fully off-track for the same reason).
+            # "Clean" means no off-track or wrong-direction event fired while inside
+            # the region -- only a clean exit earns the bonus and counts toward
+            # curves_passed_count (read by CautiousVars for the observation feature).
+            if current_tile_idx is not None:
+                is_curve_now = self._is_curve_tile(current_tile_idx)
+                if is_curve_now and not self.in_curve:
+                    self.in_curve = True
+                    self.curve_clean = True
+                elif not is_curve_now and self.in_curve:
+                    self.in_curve = False
+                    if self.curve_clean:
+                        self.curves_passed_count += 1
+                        step_reward += CURVE_PASSED_BONUS
+                        info["curve_passed"] = True
+                if self.in_curve and (off_track_wheels >= 3 or wrong_direction_now):
+                    self.curve_clean = False
+
+            # Stalled-car termination: note this counter also accumulates through
+            # CarRacingPreprocessing's 50-tick no-op warmup at the start of every
+            # episode (action=0 there, so the car is typically still stationary) --
+            # in practice that just means the policy has ~50 ticks less runway than
+            # STATIC_TIMEOUT_TICKS suggests before this can fire.
+            speed = float(np.linalg.norm(self.car.hull.linearVelocity))
+            if speed < STATIC_SPEED_THRESHOLD:
+                self.static_ticks += 1
+            else:
+                self.static_ticks = 0
+            if self.static_ticks > STATIC_TIMEOUT_TICKS:
+                terminated = True
+                info["stalled"] = True
                 step_reward = -100
 
         if self.render_mode == "human":
