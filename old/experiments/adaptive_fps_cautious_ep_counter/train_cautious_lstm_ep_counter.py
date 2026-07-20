@@ -11,6 +11,9 @@ torch.set_num_interop_threads(1)
 
 import random
 import time
+import yaml
+import sys
+import argparse
 from dataclasses import dataclass
 import gymnasium as gym
 import numpy as np
@@ -22,7 +25,7 @@ from torch.utils.tensorboard import SummaryWriter
 from gymnasium.wrappers import TimeLimit
 from datetime import datetime
 from wrappers.pre_processing import CarRacingPreprocessing
-from wrappers.adaptive_fps import AdaptiveFPSWrapper
+from wrappers.adaptive_fps_cautious_wrapper_ep_counter import AdaptiveFPS_Cautious_Wrapper_Ep
 
 @dataclass
 class Args:
@@ -46,7 +49,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "CarRacing-v3"
     """the id of the environment"""
-    total_timesteps: int = 10_000_000
+    total_timesteps: int = 15_000_000
     """total timesteps of the experiments"""
     learning_rate: float = 1e-4
     """the learning rate of the optimizer"""
@@ -86,23 +89,29 @@ class Args:
     """the mini-batch size (computed in runtime)"""
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
-    frame_cost: float = 0.0
-    budget: float = 0.0
-    max_episode_steps: int = 1200
+
+    # Adaptive-FPS cautious (ep_counter) experiment arguments
+    nav_model_path: str = None
+    """the path to the frozen navigation model"""
+    frame_cost: float = 0.02
+    """reward penalty applied each time a real observation is sampled"""
+    budget: float = 100
+    """max number of real samples allowed per episode before termination"""
+    max_episode_steps: int = 250
+    """outer TimeLimit, in wrapper-steps (each wrapper-step = skip_frames raw env frames)"""
     resume_path: str = None
     """path to a checkpoint .pt file to resume training from"""
 
-def make_env(env_id, nav_model_path, frame_cost, budget, max_episode_steps):
+def make_env(env_id, nav_model_path, frame_cost, budget, max_episode_steps, device):
     def thunk():
-        env = gym.make(env_id, continuous=False, render_mode="rgb_array",max_episode_steps=None)
-        # strip the auto-applied inner TimeLimit (spec default = 1000)
-        from gymnasium.wrappers import TimeLimit as _TL
-        while isinstance(env, _TL):
-            env = env.env
-        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.make(env_id, continuous=False, render_mode="rgb_array")
         env = CarRacingPreprocessing(env, skip_frames=4, stack_frames=4)
-        env = AdaptiveFPSWrapper(env, nav_model_path, frame_cost, budget)
+        env = AdaptiveFPS_Cautious_Wrapper_Ep(env, nav_model_path, device, frame_cost, budget)
         env = TimeLimit(env, max_episode_steps=max_episode_steps)
+        # RecordEpisodeStatistics must wrap everything above -- it sums whatever reward
+        # stream it wraps, and episodic_return should reflect the actual trained-on reward
+        # (frame_cost-adjusted, budget/goal overrides included), not the raw env's reward.
+        env = gym.wrappers.RecordEpisodeStatistics(env)
         return env
     return thunk
 
@@ -112,31 +121,16 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 class Agent(nn.Module):
-    def __init__(self, envs, image_shape = (4,96,96), n_scalars = 2, lstm_hidden_size = 64, scalar_embed_dim=128):
+    def __init__(self, envs, lstm_hidden_size=64):
         super().__init__()
-        self.image_shape = image_shape
-        self.flat_img_size = int(np.prod(image_shape)) # 36864
-        self.n_scalars   = n_scalars
-        self.scalar_embed_dim = scalar_embed_dim
+        obs_dim = int(np.prod(envs.single_observation_space.shape))
 
-        self.cnn = nn.Sequential(
-            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
-            nn.ReLU(),
-            nn.Flatten(),
-            layer_init(nn.Linear(64 * 8 * 8, 512)),
-            nn.ReLU(),
+        self.network = nn.Sequential(
+            layer_init(nn.Linear(obs_dim, 64)),
+            nn.Tanh(),
         )
 
-        self.scalar_fc = nn.Sequential(
-            layer_init(nn.Linear(n_scalars, scalar_embed_dim)),
-            nn.ReLU(),
-        )
-       
-        self.lstm = nn.LSTM(512+self.scalar_embed_dim, lstm_hidden_size)
+        self.lstm = nn.LSTM(64, lstm_hidden_size)
         for name, param in self.lstm.named_parameters():
             if "bias" in name:
                 nn.init.constant_(param, 0)
@@ -157,13 +151,6 @@ class Agent(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(64, envs.single_action_space.n), std=0.01),
         )
-    
-    def _encode(self, x):                      # x: (batch, 36866)
-        img     = x[:, :self.flat_img_size].reshape(-1, *self.image_shape)  # (batch, 4, 96, 96)
-        scalars = x[:, self.flat_img_size:]                                 # (batch, 2)
-        z = self.cnn(img / 255.0)              # normalize ONLY the image
-        z_sca = self.scalar_fc(scalars)
-        return torch.cat([z, z_sca], dim=1)
 
     def get_states(self, x, lstm_state, done):
         """
@@ -174,24 +161,17 @@ class Agent(nn.Module):
         lstm_state: ((1, batch(n_envs), hidden), (1, batch(n_envs), hidden))
         done:       (batch,)
         """
-        hidden = self._encode(x) # pass obs to the network: (n_envs, 36866) → (n_envs, 514)
+        hidden = self.network(x)
 
         # reshape for LSTM: (seq_len, batch, input_size)
         batch_size = lstm_state[0].shape[1]                             #(n_envs)
         hidden = hidden.reshape((-1, batch_size, self.lstm.input_size)) #-1 means infer this dimension automatically
         done   = done.reshape((-1, batch_size))                         #-1 means infer this dimension automatically
 
-        # Example:
-        # During rollout:
-        # hidden shape: (16, 64)
-        # reshape(-1, 16, 64) → (1, 16, 64)   ← seq_len=1, one step at a time
-
         # process step by step
         # (1 - done) zeros out h and c when episode ends
         new_hidden = []
         for h, d in zip(hidden, done):
-            # h, lstm_state = self.lstm(h.unsqueeze(0), # first argument  — input features, (reset_h, reset_c),  # second argument — initial hidden state (h, c)
-            # the h output is the latent vector, and lastm_State is the final h,c memory updated.
             h, lstm_state = self.lstm(
                 h.unsqueeze(0),
                 (
@@ -213,19 +193,36 @@ class Agent(nn.Module):
         logits = self.actor(hidden)
         probs  = Categorical(logits=logits)
         if action is None:
-                action = logits.argmax(dim=-1) if deterministic else probs.sample()
+            action = logits.argmax(dim=-1) if deterministic else probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
 
+def load_args(args_class):
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--config", type=str, default=None)
+    known, remaining = pre.parse_known_args()
+
+    base = args_class()
+    if known.config:
+        with open(known.config) as f:
+            cfg = yaml.safe_load(f) or {}
+        for k, v in cfg.items():
+            if not hasattr(base, k):
+                raise KeyError(f"Unknown key in {known.config}: '{k}'")
+            setattr(base, k, v)
+
+    # let tyro parse remaining CLI flags, using YAML values as defaults
+    sys.argv = [sys.argv[0]] + remaining
+    return tyro.cli(args_class, default=base)
+
 if __name__ == "__main__":
-    # import multiprocessing
-    # multiprocessing.set_start_method("forkserver", force=True)
-    args = tyro.cli(Args)
+    args = load_args(Args)
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
 
     date_str = datetime.now().strftime("%d-%m-%H-%M-%S")
     run_name = f"{args.env_id}_fc_{args.frame_cost}_bud_{args.budget}_{date_str}"
+    run_dir = f"experiments/adaptive_fps_cautious_ep_counter/runs/{run_name}"
 
     if args.track:
         import wandb
@@ -239,12 +236,12 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
-    info_file = os.path.join(f"runs/{run_name}", "info_settings.txt")
+    info_file = os.path.join(run_dir, "info_settings.txt")
     with open(info_file, "w") as f:
         for key, value in vars(args).items():
             f.write(f"{key}: {value}\n")
@@ -259,11 +256,13 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    nav_model_path = "runs/CarRacing-v3__ppo__1__1781901069/final.pt"
+    nav_model_path = args.nav_model_path
+    print(f"Device: {device}")
+    print(f"Navigation model path: {nav_model_path}")
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, nav_model_path, args.frame_cost, args.budget, args.max_episode_steps) 
+        [make_env(args.env_id, nav_model_path, args.frame_cost, args.budget, args.max_episode_steps, device)
         for _ in range(args.num_envs)],
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
@@ -290,7 +289,6 @@ if __name__ == "__main__":
     else:
         global_step = 0
 
-
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
@@ -300,13 +298,12 @@ if __name__ == "__main__":
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
     # TRY NOT TO MODIFY: start the game
-    #global_step = 0
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
-    
-    # Chosen FPS plots 
+
+    # Chosen FPS plots
     episode_fps_sum   = np.zeros(args.num_envs)
     episode_fps_count = np.zeros(args.num_envs)
 
@@ -318,7 +315,7 @@ if __name__ == "__main__":
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
 
-        # -----------------------------------------------------------------    
+        # -----------------------------------------------------------------
         # ROLLOUT COLLECTION.
         # -----------------------------------------------------------------
         for step in range(0, args.num_steps):
@@ -339,14 +336,18 @@ if __name__ == "__main__":
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
-            # log chosen fps every step
+            # log chosen fps every step -- skip envs that just auto-reset this step:
+            # SyncVectorEnv resets on the *next* step() call after termination, and
+            # reset() doesn't carry the wrapper's "chosen_fps" key, so infos["_chosen_fps"][i]
+            # is False (and infos["chosen_fps"][i] is a meaningless 0 fill value) for those envs
             if "chosen_fps" in infos:
+                valid_fps = infos.get("_chosen_fps", np.ones(args.num_envs, dtype=bool))
                 for i in range(args.num_envs):
-                    episode_fps_sum[i]   += infos["chosen_fps"][i]
-                    episode_fps_count[i] += 1
+                    if valid_fps[i]:
+                        episode_fps_sum[i]   += infos["chosen_fps"][i]
+                        episode_fps_count[i] += 1
 
             if "episode" in infos:
-
                 finished = infos["episode"]["_r"]  # boolean mask — which envs finished
                 for i, done in enumerate(finished):
                     if done:
@@ -364,15 +365,16 @@ if __name__ == "__main__":
                         # reset accumulators for this env
                         episode_fps_sum[i]   = 0
                         episode_fps_count[i] = 0
-            
-            if "frame_cost" in infos:
-                writer.add_scalar("charts/frame_cost", infos["frame_cost"][0], global_step)
-            if "budget" in infos:
-                writer.add_scalar("charts/budget", infos["budget"][0], global_step)
 
-        #Buffer os experience completed.
+            # frame_cost/budget are constant for the whole run -- log them straight from
+            # args instead of infos[...][0], which reads 0 whenever env 0 happens to have
+            # just auto-reset that step (see the "chosen_fps" comment above for why)
+            writer.add_scalar("charts/frame_cost", args.frame_cost, global_step)
+            writer.add_scalar("charts/budget", args.budget, global_step)
 
-        # -----------------------------------------------------------------    
+        # Buffer of experience completed.
+
+        # -----------------------------------------------------------------
         # COMPUTING ADVANTAGES AND bootstrap value if EP in env not done
         # -----------------------------------------------------------------
         with torch.no_grad():
@@ -389,14 +391,10 @@ if __name__ == "__main__":
                 delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
                 advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
             returns = advantages + values
-            #returns is a tensor of shape (1024, 16) — same shape as rewards and values.
 
-        # Buffer with experience + advantages and returns completed.
-
-        # -----------------------------------------------------------------    
+        # -----------------------------------------------------------------
         # PREPARING FOR UPDATE
         # -----------------------------------------------------------------
-        # Flat every dimenstion of the buffer.
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
         b_logprobs = logprobs.reshape(-1)
         b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
@@ -410,17 +408,7 @@ if __name__ == "__main__":
         envs_per_minibatch = args.num_envs // args.num_minibatches
         envs_indices       = np.arange(args.num_envs)
         timestep_env_grid  = np.arange(args.batch_size).reshape(args.num_steps, args.num_envs)
-        # shape of timestep_env_grid: (1024, 16)
-        #
-        #         env0   env1   env2  ...  env15
-        # step0  [   0      1      2        15]
-        # step1  [  16     17     18        31]
-        # step2  [  32     33     34        47]
-        # ...
-        # step1023 [16368 16369  ...     16383]
 
-        # Optimizing the policy and value network
-        #b_inds = np.arange(args.batch_size)
         clipfracs = []
         for epoch in range(args.update_epochs):
             np.random.shuffle(envs_indices)
@@ -483,10 +471,10 @@ if __name__ == "__main__":
 
             if args.target_kl is not None and approx_kl > args.target_kl:
                 break
-                
+
         # ── Checkpoint saving ──────────────────
-        if iteration % 5 == 0:  # save every 50 iterations
-            checkpoint_path = f"runs/{run_name}/ckpts/timestep_{global_step}_iterations_{iteration}"
+        if iteration % 50 == 0 or iteration == args.num_iterations:
+            checkpoint_path = f"{run_dir}/ckpts"
             os.makedirs(checkpoint_path, exist_ok=True)
             checkpoint_model_path = f"{checkpoint_path}/ckpt_{global_step}_iterations_{iteration}.pt"
             torch.save({
@@ -513,7 +501,7 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
+        print(f"global_step={global_step}, SPS={int(global_step / (time.time() - start_time))}")
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
@@ -522,6 +510,6 @@ if __name__ == "__main__":
         "optimizer_state_dict": optimizer.state_dict(),
         "args": vars(args),
         "global_step": global_step,
-    }, f"runs/{run_name}/model.pt")
-    print(f"Model saved → runs/{run_name}/model.pt")
+    }, f"{run_dir}/final.pt")
+    print(f"Model saved → {run_dir}/final.pt")
     writer.close()

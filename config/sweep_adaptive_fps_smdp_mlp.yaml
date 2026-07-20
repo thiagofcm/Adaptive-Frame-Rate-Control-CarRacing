@@ -1,0 +1,37 @@
+# sweep config for the Adaptive-FPS SMDP (feedforward) frame_cost study.
+# Same schema/values as config_adaptive_fps_smdp_mlp.yaml for every key except
+# `sweep:`, which sweep.py takes the Cartesian product of to build one
+# materialized run config per combination.
+seed: 1
+total_timesteps: 15_000_000
+learning_rate: 0.0003
+num_envs: 8
+num_steps: 512
+gamma: 0.99
+gae_lambda: 0.98
+num_minibatches: 4
+update_epochs: 4
+ent_coef: 0.01
+vf_coef: 0.5
+clip_coef: 0.2
+max_grad_norm: 0.5
+anneal_lr: false
+norm_adv: true
+clip_vloss: true
+nav_model_path: "experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt"
+
+# Sampling cost: charged once per decision window (see train_mlp.py). budget is a
+# window count, not a wrapper-step count, so it isn't directly comparable to the
+# ep_counter sweep's 150 -- 100 is the untuned value carried over from the closest
+# existing SMDP reference (smdp/experiments/adaptive_fps_step_loop).
+budget: 150.0
+max_physics_steps: 1000
+
+# Sweep combinations -- sweep.py builds the Cartesian product across these lists.
+# Same frame_cost grid as config/sweep_adaptive_fps_cautious_ep_counter.yaml, so
+# the two families are comparable point-for-point on this axis. frame_cost=0.0
+# isolates the budget constraint's effect on its own (no extra per-window penalty);
+# increasing it should push the policy toward lower average chosen FPS
+# (charts/mean_chosen_fps) at the cost of episodic_return.
+sweep:
+  frame_cost: [0.0, 0.05, 0.1, 0.2, 0.4, 0.5, 1.0, 2.0]
