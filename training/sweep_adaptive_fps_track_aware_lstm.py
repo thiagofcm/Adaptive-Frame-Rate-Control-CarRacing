@@ -34,9 +34,11 @@ def parse_args():
     p.add_argument("--gpus", type=int, nargs="+", default=None,
                     help="GPU ids to round-robin runs across; omit to auto-detect, pass -1 for CPU-only")
     p.add_argument("--cpus", type=int, nargs="+", default=None,
-                    help="CPU core ids to pin runs to (one dedicated core per run, via taskset); "
-                         "omit to auto-detect cores not already claimed by another process "
-                         "(see detect_free_cpus)")
+                    help="flat pool of CPU core ids to partition across runs, via taskset -- 1 core "
+                         "per combo normally, or num_envs+1 per combo when that combo's config has "
+                         "async_envs=true (must supply the full pool sized for whichever combos need "
+                         "more than 1 -- see compute_cores_per_combo); omit to auto-detect cores not "
+                         "already claimed by another process (see detect_free_cpus)")
     p.add_argument("--sequential", action="store_true",
                     help="run one combination at a time instead of launching them all in parallel")
     p.add_argument("--extra", type=str, default="",
@@ -128,8 +130,26 @@ def detect_free_cpus(n_needed):
     return chosen
 
 
-def launch(run_cfg_path, cpu, gpu, args, log_dir, tag):
-    cmd = ["taskset", "-c", str(cpu), sys.executable, "-u", TRAIN_SCRIPT, "--config", run_cfg_path]
+def compute_cores_per_combo(base_cfg, overrides):
+    """How many CPU cores this combo needs: 1 normally, or num_envs+1 (one core per
+    AsyncVectorEnv worker subprocess, +1 for the main process) when async_envs is on.
+
+    Async workers are forked from the main process and inherit its CPU affinity mask
+    at fork time -- taskset-ing the whole combo to a single core (the old behavior)
+    silently pins every worker to that same one core too, so Async gets zero real
+    parallelism and just pays IPC overhead on top of Sync-equivalent throughput.
+    Confirmed live: with a single-core taskset, all 8 async workers landed on that
+    same one core and SPS was indistinguishable from Sync.
+    """
+    merged = {**base_cfg, **overrides}
+    if merged.get("async_envs", False):
+        return int(merged.get("num_envs", 1)) + 1
+    return 1
+
+
+def launch(run_cfg_path, cpu_block, gpu, args, log_dir, tag):
+    cpu_str = ",".join(str(c) for c in cpu_block)
+    cmd = ["taskset", "-c", cpu_str, sys.executable, "-u", TRAIN_SCRIPT, "--config", run_cfg_path]
     if gpu == -1:
         cmd += ["--no-cuda"]
     if args.extra:
@@ -142,7 +162,7 @@ def launch(run_cfg_path, cpu, gpu, args, log_dir, tag):
 
     log_path = os.path.join(log_dir, f"{tag}.log")
     log_file = open(log_path, "w")
-    print(f"[sweep] launching {tag} on cpu={cpu} gpu={gpu} -> {log_path}")
+    print(f"[sweep] launching {tag} on cpus={cpu_str} gpu={gpu} -> {log_path}")
     proc = subprocess.Popen(cmd, cwd=REPO_ROOT, env=env, stdout=log_file, stderr=subprocess.STDOUT)
     return proc, log_file
 
@@ -152,11 +172,26 @@ def main():
     base_cfg, sweep_params = load_sweep_config(args.config)
     combos = list(sweep_combinations(sweep_params))
 
+    # Cores needed per combo: 1 normally, num_envs+1 when a combo's merged config has
+    # async_envs=True (see compute_cores_per_combo) -- Async workers need real distinct
+    # cores, not a share of one, or they get zero parallelism benefit.
+    cores_needed = [compute_cores_per_combo(base_cfg, overrides) for overrides in combos]
+    total_cores_needed = sum(cores_needed)
+
     gpus = args.gpus if args.gpus is not None else detect_gpus()
-    cpus = args.cpus if args.cpus is not None else detect_free_cpus(len(combos))
-    if len(cpus) < len(combos):
-        raise ValueError(f"{len(combos)} combinations need {len(combos)} distinct CPU cores, "
-                          f"only got {len(cpus)} via --cpus; omit --cpus to auto-assign one per combo")
+    cpus = args.cpus if args.cpus is not None else detect_free_cpus(total_cores_needed)
+    if len(cpus) < total_cores_needed:
+        raise ValueError(f"{len(combos)} combinations need {total_cores_needed} distinct CPU cores total "
+                          f"(sum of per-combo requirements -- higher than {len(combos)} when any combo "
+                          f"uses async_envs), only got {len(cpus)} via --cpus; omit --cpus to auto-assign")
+
+    # Partition the flat core pool into one contiguous-in-order block per combo, sized
+    # to that combo's own requirement.
+    cpu_blocks = []
+    _idx = 0
+    for n in cores_needed:
+        cpu_blocks.append(cpus[_idx:_idx + n])
+        _idx += n
 
     date_str = datetime.now().strftime("%d-%m-%H-%M-%S")
     run_root = os.path.join(SCRIPT_DIR, "runs", f"sweep_{date_str}")
@@ -176,9 +211,9 @@ def main():
         with open(run_cfg_path, "w") as f:
             yaml.safe_dump(merged, f)
 
-        cpu = cpus[i % len(cpus)]
+        cpu_block = cpu_blocks[i]
         gpu = gpus[i % len(gpus)]
-        proc, log_file = launch(run_cfg_path, cpu, gpu, args, log_dir, tag)
+        proc, log_file = launch(run_cfg_path, cpu_block, gpu, args, log_dir, tag)
         procs.append((tag, proc, log_file))
         time.sleep(1)  # stagger run_name timestamps so directories can't collide
         if args.sequential:

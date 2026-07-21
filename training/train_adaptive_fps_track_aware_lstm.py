@@ -108,7 +108,7 @@ class Args:
     """outer TimeLimit, in wrapper-steps (each wrapper-step = skip_frames raw env frames)"""
     resume_path: str = None
     """path to a checkpoint .pt file to resume training from"""
-    async_envs: bool = False
+    async_envs: bool = True
     """use AsyncVectorEnv (one real subprocess per env) instead of SyncVectorEnv. Each
     env's NavModel-CNN-forward + Box2D-physics + render cost runs concurrently across
     processes instead of serially in one -- real throughput potential on a many-core
