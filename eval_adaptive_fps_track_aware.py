@@ -39,7 +39,7 @@ from matplotlib.lines import Line2D
 import envs.car_racing_var_fps  # noqa: F401 -- registers "CarRacing_VarFramerate"
 from wrappers.pre_processing import CarRacingPreprocessing
 from wrappers.adaptive_fps_track_aware_wrapper import AdaptiveFPS_TrackAware_Wrapper
-from train_adaptive_fps_track_aware_lstm import Agent as AdaptiveAgent
+from training.train_adaptive_fps_track_aware_lstm import Agent as AdaptiveAgent
 
 FPS_CHOICES = [1, 5, 10, 25, 50]
 NAV_MODEL_PATH = "old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt"

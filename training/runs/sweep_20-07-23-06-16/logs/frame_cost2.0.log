@@ -1,0 +1,75 @@
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `wandb-entity` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `target-kl` is annotated with type `<class 'float'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `resume-path` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+Experiment info saved → runs/adaptive_fps_smdp_mlp/CarRacing_VarFramerate_smdp_mlp_fc_2.0_bud_200.0_20-07-23-06-33/info_settings.txt
+Device: cpu
+Navigation model path: old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Traceback (most recent call last):
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/training/train_adaptive_fps_smdp_mlp.py", line 238, in <module>
+    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/optim/adam.py", line 99, in __init__
+    super().__init__(params, defaults)
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/optim/optimizer.py", line 377, in __init__
+    self.add_param_group(cast(dict, param_group))
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_compile.py", line 27, in inner
+    import torch._dynamo
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/__init__.py", line 3, in <module>
+    from . import convert_frame, eval_frame, resume_execution
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/convert_frame.py", line 33, in <module>
+    from torch._dynamo.symbolic_convert import TensorifyState
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/symbolic_convert.py", line 27, in <module>
+    from torch._dynamo.exc import TensorifyScalarRestartAnalysis
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/exc.py", line 11, in <module>
+    from .utils import counters
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/utils.py", line 1752, in <module>
+    if has_triton_package():
+       ^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/utils/_triton.py", line 9, in has_triton_package
+    from triton.compiler.compiler import triton_key
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/triton/__init__.py", line 8, in <module>
+    from .runtime import (
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/triton/runtime/__init__.py", line 1, in <module>
+    from .autotuner import (Autotuner, Config, Heuristics, autotune, heuristics)
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/triton/runtime/autotuner.py", line 9, in <module>
+    from .jit import KernelInterface
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/triton/runtime/jit.py", line 12, in <module>
+    from ..runtime.driver import driver
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/triton/runtime/driver.py", line 1, in <module>
+    from ..backends import backends
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/triton/backends/__init__.py", line 50, in <module>
+    backends = _discover_backends()
+               ^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/triton/backends/__init__.py", line 44, in _discover_backends
+    driver = _load_module(name, os.path.join(root, name, 'driver.py'))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/triton/backends/__init__.py", line 12, in _load_module
+    spec.loader.exec_module(module)
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/triton/backends/nvidia/driver.py", line 7, in <module>
+    from triton.runtime.build import _build
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/triton/runtime/build.py", line 8, in <module>
+    import setuptools
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/setuptools/__init__.py", line 26, in <module>
+    from .dist import Distribution
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/setuptools/dist.py", line 20, in <module>
+    from . import (
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/setuptools/_entry_points.py", line 10, in <module>
+    from ._itertools import ensure_unique
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 921, in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 819, in module_from_spec
+  File "<frozen importlib._bootstrap>", line 800, in _init_module_attrs
+  File "<frozen importlib._bootstrap>", line 632, in cached
+KeyboardInterrupt

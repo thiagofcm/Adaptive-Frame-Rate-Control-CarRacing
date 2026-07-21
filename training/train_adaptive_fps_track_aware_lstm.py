@@ -4,6 +4,11 @@ os.environ["OMP_NUM_THREADS"]   = "1"
 os.environ["MKL_NUM_THREADS"]   = "1"
 os.environ["OPENBLAS_NTHREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
+# Must be set before any pygame/SDL init happens -- relevant for --async-envs, where
+# each AsyncVectorEnv subprocess does its own SDL driver auto-detection independently
+# instead of once in a single process; pin it explicitly rather than relying on
+# whatever the (currently unconfigured) default happens to resolve to on this machine.
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import torch
 torch.set_num_threads(1)
@@ -103,6 +108,13 @@ class Args:
     """outer TimeLimit, in wrapper-steps (each wrapper-step = skip_frames raw env frames)"""
     resume_path: str = None
     """path to a checkpoint .pt file to resume training from"""
+    async_envs: bool = False
+    """use AsyncVectorEnv (one real subprocess per env) instead of SyncVectorEnv. Each
+    env's NavModel-CNN-forward + Box2D-physics + render cost runs concurrently across
+    processes instead of serially in one -- real throughput potential on a many-core
+    machine, at the cost of subprocess start/IPC overhead and less deterministic step
+    ordering than Sync. Off by default until validated for long unattended runs;
+    compare against Sync on the same config before trusting it for a real sweep."""
 
 def make_env(env_id, nav_model_path, frame_cost, budget, max_episode_steps, device):
     def thunk():
@@ -263,10 +275,17 @@ if __name__ == "__main__":
     print(f"Navigation model path: {nav_model_path}")
 
     # env setup
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, nav_model_path, args.frame_cost, args.budget, args.max_episode_steps, device)
-        for _ in range(args.num_envs)],
-    )
+    env_fns = [make_env(args.env_id, nav_model_path, args.frame_cost, args.budget, args.max_episode_steps, device)
+               for _ in range(args.num_envs)]
+    if args.async_envs:
+        # context="fork" explicitly rather than the platform default: fork (the Linux
+        # default anyway) inherits the already-imported torch/gymnasium/Box2D modules
+        # from this process instead of re-importing them fresh per subprocess (spawn),
+        # and there's no CUDA context here to make fork unsafe (device is CPU-only in
+        # every config this has been run with so far).
+        envs = gym.vector.AsyncVectorEnv(env_fns, context="fork")
+    else:
+        envs = gym.vector.SyncVectorEnv(env_fns)
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs).to(device)

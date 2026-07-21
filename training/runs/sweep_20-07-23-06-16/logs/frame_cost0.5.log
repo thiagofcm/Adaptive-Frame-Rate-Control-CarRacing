@@ -1,0 +1,87 @@
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `wandb-entity` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `target-kl` is annotated with type `<class 'float'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `resume-path` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+Experiment info saved → runs/adaptive_fps_smdp_mlp/CarRacing_VarFramerate_smdp_mlp_fc_0.5_bud_200.0_20-07-23-06-30/info_settings.txt
+Device: cpu
+Navigation model path: old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Traceback (most recent call last):
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/training/train_adaptive_fps_smdp_mlp.py", line 238, in <module>
+    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/optim/adam.py", line 99, in __init__
+    super().__init__(params, defaults)
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/optim/optimizer.py", line 377, in __init__
+    self.add_param_group(cast(dict, param_group))
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_compile.py", line 27, in inner
+    import torch._dynamo
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/__init__.py", line 42, in <module>
+    from .polyfills import loader as _  # usort: skip # noqa: F401
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/polyfills/loader.py", line 24, in <module>
+    POLYFILLED_MODULES: Tuple["ModuleType", ...] = tuple(
+                                                   ^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/polyfills/loader.py", line 25, in <genexpr>
+    importlib.import_module(f".{submodule}", package=polyfills.__name__)
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/importlib/__init__.py", line 90, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/polyfills/builtins.py", line 26, in <module>
+    @substitute_in_graph(builtins.all, can_constant_fold_through=True)
+     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/decorators.py", line 364, in wrapper
+    rule_map: Dict[Any, Type[VariableTracker]] = get_torch_obj_rule_map()
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/trace_rules.py", line 2875, in get_torch_obj_rule_map
+    obj = load_object(k)
+          ^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/trace_rules.py", line 2906, in load_object
+    val = _load_obj_from_str(x[0])
+          ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_dynamo/trace_rules.py", line 2890, in _load_obj_from_str
+    return getattr(importlib.import_module(module), obj_name)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/importlib/__init__.py", line 90, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_higher_order_ops/map.py", line 6, in <module>
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_functorch/aot_autograd.py", line 48, in <module>
+    from ._aot_autograd.autograd_cache import (  # noqa: F401
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_functorch/_aot_autograd/autograd_cache.py", line 22, in <module>
+    from torch._inductor.codecache import (
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_inductor/codecache.py", line 93, in <module>
+    from torch._inductor.cpp_builder import (
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_inductor/cpp_builder.py", line 25, in <module>
+    from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_inductor/cpu_vec_isa.py", line 34, in <module>
+    class VecISA:
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/torch/_inductor/cpu_vec_isa.py", line 38, in VecISA
+    _dtype_nelements: Dict[torch.dtype, int]
+                      ~~~~^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/typing.py", line 395, in inner
+    return _caches[func](*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/typing.py", line 1481, in __getitem__
+    params = tuple(_type_check(p, msg) for p in params)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/typing.py", line 1481, in <genexpr>
+    params = tuple(_type_check(p, msg) for p in params)
+                   ^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/typing.py", line 193, in _type_check
+    arg = _type_convert(arg, module=module, allow_special_forms=allow_special_forms)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/typing.py", line 166, in _type_convert
+    def _type_convert(arg, module=None, *, allow_special_forms=False):
+    
+KeyboardInterrupt

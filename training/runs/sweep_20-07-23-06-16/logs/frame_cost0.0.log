@@ -1,0 +1,56 @@
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `wandb-entity` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `target-kl` is annotated with type `<class 'float'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `resume-path` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+Experiment info saved → runs/adaptive_fps_smdp_mlp/CarRacing_VarFramerate_smdp_mlp_fc_0.0_bud_200.0_20-07-23-06-27/info_settings.txt
+Device: cpu
+Navigation model path: old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Traceback (most recent call last):
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/training/train_adaptive_fps_smdp_mlp.py", line 265, in <module>
+    next_obs, _ = envs.reset(seed=args.seed)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/vector/sync_vector_env.py", line 228, in reset
+    self._env_obs[i], env_info = env.reset(
+                                 ^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/wrappers/common.py", line 542, in reset
+    obs, info = super().reset(seed=seed, options=options)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/core.py", line 333, in reset
+    return self.env.reset(seed=seed, options=options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/wrappers/adaptive_fps_cautious_smdp_wrapper.py", line 117, in reset
+    observed_frame, info = self.env.reset(seed=seed, options=options)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/wrappers/pre_processing.py", line 28, in reset
+    observation, reward, terminated, truncated, info = self.env.step(0)
+                                                       ^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/wrappers/common.py", line 392, in step
+    return super().step(action)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/core.py", line 327, in step
+    return self.env.step(action)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/wrappers/common.py", line 284, in step
+    return self.env.step(action)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/envs/car_racing_var_fps.py", line 619, in step
+    self.state = self._render("state_pixels")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/envs/car_racing_var_fps.py", line 758, in _render
+    self._render_road(zoom, trans, angle)
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/envs/car_racing_var_fps.py", line 828, in _render_road
+    self._draw_colored_polygon(self.surf, poly, color, zoom, translation, angle)
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/envs/car_racing_var_fps.py", line 901, in _draw_colored_polygon
+    poly = [pygame.math.Vector2(c).rotate_rad(angle) for c in poly]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

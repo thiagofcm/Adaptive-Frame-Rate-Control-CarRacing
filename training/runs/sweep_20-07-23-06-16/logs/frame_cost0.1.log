@@ -1,0 +1,61 @@
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `wandb-entity` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `target-kl` is annotated with type `<class 'float'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `resume-path` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+Experiment info saved → runs/adaptive_fps_smdp_mlp/CarRacing_VarFramerate_smdp_mlp_fc_0.1_bud_200.0_20-07-23-06-25/info_settings.txt
+Device: cpu
+Navigation model path: old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Traceback (most recent call last):
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/training/train_adaptive_fps_smdp_mlp.py", line 265, in <module>
+    next_obs, _ = envs.reset(seed=args.seed)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/vector/sync_vector_env.py", line 228, in reset
+    self._env_obs[i], env_info = env.reset(
+                                 ^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/wrappers/common.py", line 542, in reset
+    obs, info = super().reset(seed=seed, options=options)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/core.py", line 333, in reset
+    return self.env.reset(seed=seed, options=options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/wrappers/adaptive_fps_cautious_smdp_wrapper.py", line 117, in reset
+    observed_frame, info = self.env.reset(seed=seed, options=options)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/wrappers/pre_processing.py", line 24, in reset
+    observation, info = self.env.reset(seed=seed, options=options)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/wrappers/common.py", line 399, in reset
+    return super().reset(seed=seed, options=options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/core.py", line 333, in reset
+    return self.env.reset(seed=seed, options=options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/wrappers/common.py", line 292, in reset
+    return env_reset_passive_checker(self.env, seed=seed, options=options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/utils/passive_env_checker.py", line 184, in env_reset_passive_checker
+    result = env.reset(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/envs/car_racing_var_fps.py", line 553, in reset
+    super().reset(seed=seed)
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/envs/box2d/car_racing.py", line 537, in reset
+    return self.step(None)[0], {}
+           ^^^^^^^^^^^^^^^
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/envs/car_racing_var_fps.py", line 619, in step
+    self.state = self._render("state_pixels")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/envs/car_racing_var_fps.py", line 758, in _render
+    self._render_road(zoom, trans, angle)
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/envs/car_racing_var_fps.py", line 810, in _render_road
+    grass.append(
+KeyboardInterrupt

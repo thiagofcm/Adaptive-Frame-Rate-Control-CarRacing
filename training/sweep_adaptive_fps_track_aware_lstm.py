@@ -35,7 +35,8 @@ def parse_args():
                     help="GPU ids to round-robin runs across; omit to auto-detect, pass -1 for CPU-only")
     p.add_argument("--cpus", type=int, nargs="+", default=None,
                     help="CPU core ids to pin runs to (one dedicated core per run, via taskset); "
-                         "omit to auto-assign distinct cores starting at 0")
+                         "omit to auto-detect cores not already claimed by another process "
+                         "(see detect_free_cpus)")
     p.add_argument("--sequential", action="store_true",
                     help="run one combination at a time instead of launching them all in parallel")
     p.add_argument("--extra", type=str, default="",
@@ -73,6 +74,60 @@ def detect_gpus():
     return [-1]
 
 
+def detect_free_cpus(n_needed):
+    """Pick the n_needed *least contended* core ids, ranked by how many other
+    processes are already exclusively pinned (via taskset -c <single core>) to each
+    one -- rather than always handing out a fixed 0..n_needed-1.
+
+    Without this, two concurrent sweep launches independently taskset their combos
+    onto cores 0, 1, 2, ... -- CPU affinity restricts a process to a core, it doesn't
+    reserve it, so two processes pinned to the same single core just get time-sliced
+    ~50/50 by the scheduler. This happened for real on this project: two sweep
+    invocations both defaulted to cores 0-11, and every process ended up at roughly
+    half its solo throughput (confirmed via `taskset -pc <pid>` showing identical
+    core assignments across both process groups).
+
+    On a heavily shared machine, "fully idle core" may not exist at all -- verified
+    here every one of 256 cores already has 3-11 other single-affinity processes on
+    it (2500+ total processes, a dozen logged-in users). Ranking by contention still
+    helps in that case: it picks whichever cores happen to be least loaded right now
+    instead of blindly colliding with this project's *own* previous launch on 0-11.
+    """
+    try:
+        import psutil
+    except ImportError:
+        print("[sweep] psutil not available -- falling back to cores 0..N-1 with no "
+              "collision detection. Install psutil, or pass --cpus explicitly if "
+              "another sweep might already be running.")
+        return list(range(n_needed))
+
+    all_cores = sorted(os.sched_getaffinity(0))
+    counts = {c: 0 for c in all_cores}
+    owners = {c: [] for c in all_cores}
+    for proc in psutil.process_iter(["pid"]):
+        try:
+            affinity = proc.cpu_affinity()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+            continue
+        # Only single-core affinity counts as "claimed" -- that's the taskset -c
+        # pattern this script (and any other sweep launch) uses; a process with the
+        # full default affinity isn't deliberately pinned to anything specific.
+        if len(affinity) == 1 and affinity[0] in counts:
+            counts[affinity[0]] += 1
+            owners[affinity[0]].append(proc.pid)
+
+    ranked = sorted(all_cores, key=lambda c: counts[c])
+    chosen = ranked[:n_needed]
+
+    if any(counts[c] > 0 for c in chosen):
+        still_shared = {c: owners[c] for c in chosen if counts[c] > 0}
+        print(f"[sweep] No fully idle cores available -- picked the {n_needed} "
+              f"least-contended ones instead. Still-shared: {still_shared}")
+    else:
+        print(f"[sweep] Found {n_needed} fully idle cores: {chosen}")
+    return chosen
+
+
 def launch(run_cfg_path, cpu, gpu, args, log_dir, tag):
     cmd = ["taskset", "-c", str(cpu), sys.executable, "-u", TRAIN_SCRIPT, "--config", run_cfg_path]
     if gpu == -1:
@@ -98,7 +153,7 @@ def main():
     combos = list(sweep_combinations(sweep_params))
 
     gpus = args.gpus if args.gpus is not None else detect_gpus()
-    cpus = args.cpus if args.cpus is not None else list(range(len(combos)))
+    cpus = args.cpus if args.cpus is not None else detect_free_cpus(len(combos))
     if len(cpus) < len(combos):
         raise ValueError(f"{len(combos)} combinations need {len(combos)} distinct CPU cores, "
                           f"only got {len(cpus)} via --cpus; omit --cpus to auto-assign one per combo")
