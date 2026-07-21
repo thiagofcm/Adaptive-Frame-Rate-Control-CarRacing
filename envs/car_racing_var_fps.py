@@ -62,14 +62,14 @@ MAX_SHAPE_DIM = (
 # episode is terminated instead of letting it keep racking up reward running
 # backward. Matches the alignment sign convention of the heading_alignment
 # cautious-variable feature in utils/cautious_variables.py.
-WRONG_DIRECTION_ALIGNMENT_THRESHOLD = -0.5
+WRONG_DIRECTION_ALIGNMENT_THRESHOLD = -0.8
 
 # Terminate if the car sits below STATIC_SPEED_THRESHOLD (world-units/s -- same
 # "stalled" cutoff already used by plot_track_trajectory in utils/cautious_variables.py)
 # for more than STATIC_TIMEOUT_TICKS consecutive physics ticks, so a truly stuck car
 # doesn't just sit there accumulating negative reward for the rest of the episode.
 STATIC_SPEED_THRESHOLD = 1.0
-STATIC_TIMEOUT_TICKS = 100
+STATIC_TIMEOUT_TICKS = 400
 
 # Per-segment |beta[i+1]-beta[i]| angle threshold for "this tile is part of a curve" --
 # an independent, self-contained calibration from CautiousVars' curve_thresh (which is
@@ -79,7 +79,7 @@ CURVE_TILE_TURN_THRESHOLD = 0.05
 # Reward bonus paid once, on cleanly exiting a curve region (no off-track/wrong-direction
 # event while inside it) -- comparable to a handful of tiles' worth of +1000/N progress
 # reward, without dominating it or the -100 terminal penalties.
-CURVE_PASSED_BONUS = 10.0
+CURVE_PASSED_BONUS = 20.0
 
 class FrictionDetector(contactListener):
     def __init__(self, env, lap_complete_percent):
@@ -563,6 +563,7 @@ class CarRacing_VarFramerate(CarRacing):
         self.new_lap = False
         self.road_poly = []
         self.static_ticks = 0  # consecutive ticks with speed < STATIC_SPEED_THRESHOLD
+        self.off_track_ticks = 0  # consecutive ticks with >=3 wheels off road
         self.in_curve = False
         self.curve_clean = True
         self.curves_passed_count = 0
@@ -586,7 +587,7 @@ class CarRacing_VarFramerate(CarRacing):
                 )
         self.car = Car(self.world, *self.track[0][1:4])
         self.total_curves_on_track = max(self._count_curve_regions(), 1)  # avoid /0
-        print(f"There are {self.total_curves_on_track} curves on the track.")
+        #print(f"There are {self.total_curves_on_track} curves on the track.")
 
         if self.render_mode == "human":
             self.render()
@@ -637,6 +638,19 @@ class CarRacing_VarFramerate(CarRacing):
 
             step_reward = self.reward - self.prev_reward
             self.prev_reward = self.reward
+
+            # Off-track-duration termination: same STATIC_TIMEOUT_TICKS budget as the
+            # stalled-car check below, applied to consecutive off-track ticks instead
+            # of consecutive low-speed ticks -- a car that's been off-track (>=3
+            # wheels) this long isn't coming back on its own either.
+            if off_track_wheels >= 3:
+                self.off_track_ticks += 1
+            else:
+                self.off_track_ticks = 0
+            if self.off_track_ticks > STATIC_TIMEOUT_TICKS:
+                terminated = True
+                info["off_track_timeout"] = True
+                step_reward = -100
             if self.tile_visited_count == len(self.track) or self.new_lap:
                 # Termination due to finishing lap
                 terminated = True

@@ -298,6 +298,12 @@ if __name__ == "__main__":
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    # 1.0 where fps_action was actually applied this tick (a real sampling instant),
+    # 0.0 where it was silently discarded (obs_interval not yet elapsed) -- used to
+    # exclude non-causal ticks from the policy loss (see update loop below). Defaults
+    # to 0 so an unset slot (shouldn't happen once "frame_consumed" is present in
+    # infos) doesn't accidentally get treated as a real decision.
+    masks = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
     # TRY NOT TO MODIFY: start the game
     start_time = time.time()
@@ -337,6 +343,15 @@ if __name__ == "__main__":
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
+
+            # frame_consumed: was fps_action this tick a real decision (obs_interval
+            # elapsed) or silently discarded? Same auto-reset validity-mask handling
+            # as chosen_fps below -- fill with 0.0 (not causal) for the rare slot where
+            # the wrapper's step() didn't actually run this tick.
+            if "frame_consumed" in infos:
+                valid_fc = infos.get("_frame_consumed", np.ones(args.num_envs, dtype=bool))
+                fc = np.where(valid_fc, infos["frame_consumed"], 0.0)
+                masks[step] = torch.tensor(fc, dtype=torch.float32).to(device)
 
             # log chosen fps every step -- skip envs that just auto-reset this step:
             # SyncVectorEnv resets on the *next* step() call after termination, and
@@ -404,6 +419,7 @@ if __name__ == "__main__":
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
         b_dones      = dones.reshape(-1)
+        b_masks      = masks.reshape(-1)
 
         # Shuffle Env not timesteps
         assert args.num_envs % args.num_minibatches == 0
@@ -433,20 +449,45 @@ if __name__ == "__main__":
                 logratio = newlogprob - b_logprobs[minibatch_flat_indices]
                 ratio = logratio.exp()
 
+                # mb_mask: 1.0 where fps_action was a real, causal decision this tick,
+                # 0.0 where it was silently discarded (obs_interval not yet elapsed).
+                # Policy-side terms below (pg_loss, entropy, KL/clipfrac diagnostics)
+                # must not be trained on the discarded-action ticks -- the sampled
+                # action there had zero effect on the transition that produced the
+                # reward being credited, so training on it is *wrong* credit
+                # assignment, not just extra variance. The value function/GAE targets
+                # are unaffected by this mask -- they describe "how good is this
+                # state," which is meaningful every tick regardless of whether that
+                # tick's action was causal.
+                mb_mask = b_masks[minibatch_flat_indices]
+                mb_mask_sum = mb_mask.sum().clamp(min=1.0)
+
                 with torch.no_grad():
                     # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                    old_approx_kl = (-logratio).mean()
-                    approx_kl = ((ratio - 1) - logratio).mean()
-                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
+                    old_approx_kl = (mb_mask * (-logratio)).sum() / mb_mask_sum
+                    approx_kl = (mb_mask * ((ratio - 1) - logratio)).sum() / mb_mask_sum
+                    clipfracs += [((mb_mask * ((ratio - 1.0).abs() > args.clip_coef).float()).sum() / mb_mask_sum).item()]
 
                 mb_advantages = b_advantages[minibatch_flat_indices]
                 if args.norm_adv:
-                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+                    # Normalize using only the causal-tick statistics -- otherwise the
+                    # discarded-tick advantages (the majority, at low FPS) would
+                    # dominate the mean/std used to rescale the minority that actually
+                    # feeds the policy loss below.
+                    valid_advantages = mb_advantages[mb_mask.bool()]
+                    if valid_advantages.numel() > 0:
+                        # unbiased=False: default (unbiased=True) std of a single-element
+                        # tensor is NaN (0/0 degrees of freedom), which is a real
+                        # possibility here -- a minibatch can easily contain very few
+                        # causal ticks when most envs are running at low FPS. Population
+                        # std is well-defined (0) in that case, and the +1e-8 below
+                        # keeps the division safe.
+                        mb_advantages = (mb_advantages - valid_advantages.mean()) / (valid_advantages.std(unbiased=False) + 1e-8)
 
                 # Policy loss
                 pg_loss1 = -mb_advantages * ratio
                 pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                pg_loss = (mb_mask * torch.max(pg_loss1, pg_loss2)).sum() / mb_mask_sum
 
                 # Value loss
                 newvalue = newvalue.view(-1)
@@ -463,7 +504,7 @@ if __name__ == "__main__":
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[minibatch_flat_indices]) ** 2).mean()
 
-                entropy_loss = entropy.mean()
+                entropy_loss = (mb_mask * entropy).sum() / mb_mask_sum
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
                 optimizer.zero_grad()

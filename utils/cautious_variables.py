@@ -148,7 +148,6 @@ def draw_debug_text(frame, debug_dict, step_counter):
         f"vx: {debug_dict['vx']:.3f}",
         f"vy: {debug_dict['vy']:.3f}",
         f"dist_to_curve: {debug_dict['dist_to_curve']:.3f}",
-        f"time_to_curve: {debug_dict['time_to_curve']:.3f}",
         f"cross_track: {debug_dict['cross_track']:.3f}",
         f"off_track: {debug_dict['off_track']}",
     ]
@@ -195,17 +194,13 @@ class Agent(nn.Module):
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
 class CautiousVars:
-    def __init__(self, curve_thresh=0.04, lookahead=300.0, search_window=25, budget=100):
+    def __init__(self, curve_thresh=0.04, lookahead=300.0, search_window=25):
         # curve_thresh : |curvature| (rad/world-unit) above which a node = "a curve"
         # lookahead    : how far ahead to scan for the next curve (caps dist_to_curve)
         # search_window: +/- nodes around last index to search for the nearest node
-        # budget       : same decision budget the wrapper penalizes against -- normalizes
-        #                the frame_counter feature so it reaches 1.0 exactly when the
-        #                budget-overrun penalty is about to fire, not an arbitrary horizon
         self.curve_thresh = curve_thresh
         self.lookahead = lookahead
         self.search_window = search_window
-        self.budget = budget
         self.last_idx = 0
         self.prev_cross_track = None   # None until the first get_cautious_var() call
         self.off_track_ticks = 0.0     # consecutive ticks with >=OFF_TRACK_WHEEL_THRESHOLD wheels off
@@ -264,16 +259,12 @@ class CautiousVars:
         self.off_track_ticks = 0.0
         return self
 
-    def get_cautious_var(self, env, dt_ticks=1, episode_frame_count=1):
+    def get_cautious_var(self, env, dt_ticks=1):
         # dt_ticks: physics ticks elapsed since the previous call to this method --
         # used to scale the rate-of-change and duration features so they're
         # comparable across different chosen FPS rather than an artifact of how
         # often the caller happens to sample. Pass 0 right after reset_track_reading()
         # (no prior reading exists yet), and the actual elapsed tick count otherwise.
-        # episode_frame_count: the wrapper's own decision counter (same one compared
-        # against `budget` for the overrun penalty) -- passed in rather than tracked
-        # independently here, so this can never drift out of sync with the value the
-        # reward is actually computed from.
         # Car object
         car = env.unwrapped.car
         # Position x and y of the car
@@ -330,12 +321,6 @@ class CautiousVars:
                 found = True
             if j == closest_idx:
                 break
-
-        # ------------------- TIME TO NEXT CURVE -------------------------
-        # Normalized by TIME_REF (10s horizon) instead of left raw -- unbounded when
-        # speed->0 (a near-stalled car could otherwise spike this to ~lookahead/1e-3).
-        time_to_curve = dist_to_curve / max(speed, 1e-3)
-        time_to_curve_norm = np.clip(time_to_curve / TIME_REF, 0, 1)
 
         # ------------------- FEATURE 1: CURVE SEVERITY, NEXT N TILES -------------------------
         # Sum of |heading-change| over the next CURVE_SEVERITY_TILES track nodes ahead of
@@ -394,13 +379,11 @@ class CautiousVars:
             self.off_track_ticks = 0.0
         time_off_track_norm = np.clip((self.off_track_ticks / SIM_FPS) / TIME_REF, 0, 1)
 
-        # ------------------- FEATURE 5: FRAME COUNTER -------------------------
-        # How many decisions have been spent out of the wrapper's own `budget` --
-        # a clean 0->1 ramp that hits 1.0 exactly when the budget-overrun penalty
-        # is about to fire, rather than an arbitrary fixed-tick horizon.
-        frame_counter_norm = np.clip(episode_frame_count / self.budget, 0, 1)
+        # NOTE: frame_counter (episode_frame_count/budget) lives in the wrapper's
+        # augmented observation block now, not here -- see AdaptiveFPS_TrackAware_Wrapper.
+        # _get_augmented_obs() in wrappers/adaptive_fps_track_aware_wrapper.py.
 
-        # ------------------- FEATURE 6: EPISODE COMPLETION -------------------------
+        # ------------------- FEATURE: EPISODE COMPLETION -------------------------
         # Fraction of distinct track tiles visited so far this episode -- reuses the
         # env's own tile_visited_count (incremented once per tile, first contact only;
         # see FrictionDetector in envs/car_racing_var_fps.py), not reimplemented here.
@@ -429,17 +412,15 @@ class CautiousVars:
         return np.array([
             v[0]/SPEED_REF,  # vx
             v[1]/SPEED_REF,  # vy
-            np.clip(dist_to_curve / self.lookahead, 0, 1), # dist_to_curve -> [0,1],
-            time_to_curve_norm,
+            np.clip(dist_to_curve / self.lookahead, 0, 1),  # dist_to_curve -> [0,1]
+            curve_severity_norm,
+            heading_alignment,
             np.clip(cross_track / TRACK_WIDTH, -1, 1),  # -1/+1 = at the left/right track edge
+            cross_track_rate_norm,
             off_track,
-            curve_severity_norm,     # feature 1
-            cross_track_rate_norm,   # feature 2
-            heading_alignment,       # feature 3 (was heading_diff)
-            time_off_track_norm,     # feature 4
-            frame_counter_norm,      # feature 5
-            episode_completion,      # feature 6
-            curves_passed_norm,      # feature 7
+            time_off_track_norm,
+            episode_completion,
+            curves_passed_norm,
         ], dtype=np.float32)
 
     def _nearest_idx(self, p):
@@ -537,20 +518,19 @@ def main():
 
         obs, r, term, trunc, _ = env.step(action.item())
         c = cv.get_cautious_var(env, dt_ticks=1)
-        (vx_n, vy_n, dist_n, time_n, cross_n, off_n,
-         severity_n, cross_rate_n, heading_n, time_off_n, frame_n, completion_n, curves_n) = c
+        (vx_n, vy_n, dist_n, severity_n, heading_n, cross_n,
+         cross_rate_n, off_n, time_off_n, completion_n, curves_n) = c
 
-        log.append((vx_n, vy_n, dist_n, time_n, cross_n, off_n))
+        log.append((vx_n, vy_n, dist_n, cross_n, off_n))
 
         print(f" Step: {env.step_counter} - {obs_type} Observation - "
               f"Frames Consumed: {total_frame_counter} - X: {x}, Y: {y}, Action:{action}")
         print(f"vx: {vx_n}, vy: {vy_n}, "
-              f"dist_to_curve: {dist_n}, time_to_curve: {time_n}, "
-              f"cross_track: {cross_n}, off_track: {off_n}, "
-              f"curve_severity: {severity_n}, cross_track_rate: {cross_rate_n}, "
-              f"heading_alignment: {heading_n}, time_off_track: {time_off_n}, "
-              f"frame_counter: {frame_n}, episode_completion: {completion_n}, "
-              f"curves_passed: {curves_n}")
+              f"dist_to_curve: {dist_n}, curve_severity: {severity_n}, "
+              f"heading_alignment: {heading_n}, cross_track: {cross_n}, "
+              f"cross_track_rate: {cross_rate_n}, off_track: {off_n}, "
+              f"time_off_track: {time_off_n}, "
+              f"episode_completion: {completion_n}, curves_passed: {curves_n}")
         
         if args.save_video:
             frames.append(env.unwrapped.render())   # raw 96x96 RGB
@@ -583,7 +563,7 @@ def main():
         annotated_frames = []
 
         for idx, (frame, vals) in enumerate(zip(frames, log)):
-            vx_n, vy_n, dist_n, time_n, cross_n, off_n = vals
+            vx_n, vy_n, dist_n, cross_n, off_n = vals
             annotated_frames.append(
                 draw_debug_text(
                     frame,
@@ -591,7 +571,6 @@ def main():
                         "vx": vx_n,
                         "vy": vy_n,
                         "dist_to_curve": dist_n,
-                        "time_to_curve": time_n,
                         "cross_track": cross_n,
                         "off_track": off_n
                     },

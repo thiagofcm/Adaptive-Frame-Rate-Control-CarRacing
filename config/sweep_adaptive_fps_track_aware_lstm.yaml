@@ -1,0 +1,50 @@
+# sweep config for the Adaptive-FPS Track-Aware (LSTM) frame_cost study.
+# Trains train_adaptive_fps_track_aware_lstm.py on the CarRacing_VarFramerate env
+# (envs/car_racing_var_fps.py) + AdaptiveFPS_TrackAware_Wrapper
+# (wrappers/adaptive_fps_track_aware_wrapper.py), i.e. the current 11-dim cautious
+# + 3-dim augmented (obs_age_ratio, fps_ratio, frame_counter) observation, 12-dim
+# action-consistent reward shaping (off-track penalty, curve-passed bonus, wrong-
+# direction/stalled/off-track-timeout terminations).
+#
+# Same schema/values as train_adaptive_fps_track_aware_lstm.py's Args for every key
+# except `sweep:`, which training/sweep_adaptive_fps_track_aware_lstm.py takes the
+# Cartesian product of to build one materialized run config per combination.
+seed: 1
+total_timesteps: 15_000_000
+learning_rate: 0.0003
+num_envs: 8
+num_steps: 512
+gamma: 0.99
+gae_lambda: 0.98
+num_minibatches: 4
+update_epochs: 4
+ent_coef: 0.02
+vf_coef: 0.5
+clip_coef: 0.2
+max_grad_norm: 0.5
+anneal_lr: true
+norm_adv: true
+clip_vloss: true
+nav_model_path: "old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt"
+
+# max_episode_steps MUST stay above STATIC_TIMEOUT_TICKS (currently 400 in
+# envs/car_racing_var_fps.py) -- otherwise the outer TimeLimit truncates every
+# episode before the stalled/off-track-timeout terminations can ever fire. 500
+# leaves comfortable headroom above that.
+max_episode_steps: 2000
+# Decision budget in real samples (episode_frame_count), not physics ticks --
+# comfortably below the 500-tick ceiling so "sample less than every tick" strategies
+# still have room to finish clean before the overrun penalty fires.
+budget: 180
+
+# Sweep combinations -- training/sweep_adaptive_fps_track_aware_lstm.py builds the
+# Cartesian product across these lists. Calibrated against real post-reformulation
+# rollouts (frozen NavModel, frame_cost=0.0, huge budget): fixed fps=50 vs fps=1 gave
+# mean returns of +1177.8 vs -138.4 (256 vs 4 decisions/episode) -- a ~1300-point
+# driving-quality gap from FPS choice alone. frame_cost=0.0 isolates the budget
+# constraint on its own; the old default of 0.02 was too weak to matter at all (max
+# possible saving over an episode ~5 points, dwarfed by that gap). 0.05-0.25 is where
+# frame_cost starts being comparable to the quality difference between *adjacent*
+# FPS choices (e.g. 50 vs 25); 1.0-2.0 should visibly dominate it.
+sweep:
+  frame_cost: [0.0, 0.05, 0.1, 0.25, 0.3, 0.4, 0.5, 1.0, 2.0, 3.0, 4.0, 10.0]

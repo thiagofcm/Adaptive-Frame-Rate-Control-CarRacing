@@ -10,7 +10,7 @@ wrapper: wrappers/adaptive_fps_track_aware_wrapper.py). Two modes:
 
 wrapper.step() is one *physics tick* (not a decision window), and the FPS action
 is only actually consumed by the wrapper at sampling instants -- in between, the
-12-dim cautious-var block of the observation is held stale (unchanged) rather than
+11-dim cautious-var block of the observation is held stale (unchanged) rather than
 recomputed. At --fixed-fps 1 the vast majority of on-screen ticks will show a
 "STALE" cautious reading, by design -- that's the sensing-frequency effect this
 whole pipeline is about, not a bug in this eval script.
@@ -44,12 +44,12 @@ from train_adaptive_fps_track_aware_lstm import Agent as AdaptiveAgent
 FPS_CHOICES = [1, 5, 10, 25, 50]
 NAV_MODEL_PATH = "old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt"
 
-# Must match the 13-dim layout returned by CautiousVars.get_cautious_var()
+# Must match the 11-dim layout returned by CautiousVars.get_cautious_var() -- note
+# frame_counter is NOT in here, it's in the wrapper's augmented block (last 3 obs dims).
 CAUTIOUS_LABELS = [
-    "vx", "vy", "dist_to_curve", "time_to_curve",
-    "cross_track", "off_track", "curve_severity", "cross_track_rate",
-    "heading_alignment", "time_off_track", "frame_counter", "episode_completion",
-    "curves_passed",
+    "vx", "vy", "dist_to_curve", "curve_severity", "heading_alignment", "cross_track",
+    "cross_track_rate", "off_track", "time_off_track",
+    "episode_completion", "curves_passed",
 ]
 
 
@@ -68,7 +68,7 @@ def make_eval_env(env_id, nav_model_path, frame_cost, budget, max_episode_steps)
 
 def load_adaptive_agent(ckpt_path, device):
     class _Dummy:
-        single_observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(16,), dtype=np.float32)
+        single_observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(14,), dtype=np.float32)
         single_action_space = gym.spaces.Discrete(len(FPS_CHOICES))
     agent = AdaptiveAgent(_Dummy()).to(device)
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
@@ -226,7 +226,7 @@ def main():
 
         if args.display or args.save_video:
             frame = env.unwrapped.render()
-            annotated = draw_cautious_overlay(frame, ep_len, chosen, fresh, obs[:13], ep_return)
+            annotated = draw_cautious_overlay(frame, ep_len, chosen, fresh, obs[:11], ep_return)
             if args.save_video:
                 frames.append(annotated)
             if args.display:

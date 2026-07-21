@@ -1,10 +1,9 @@
 import gymnasium as gym
 import torch
 import torch.nn as nn
-from gymnasium import error, spaces
+from gymnasium import spaces
 from gymnasium.envs.box2d.car_racing import FPS
 import numpy as np
-import hashlib
 from utils.cautious_variables import CautiousVars
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -55,15 +54,25 @@ class NavModel:
 class AdaptiveFPS_Cautious_SMDP_Wrapper(gym.Wrapper):
     """
     SMDP-formulated adaptive-FPS wrapper: one wrapper step() = one full decision
-    window. The FPS action chosen at the start of a window sets obs_interval
-    (the window length in physics ticks); NavModel drives the whole window on
-    the observation sampled at the window's start -- held fixed and refreshed
-    only once the window ends -- and in-window reward is accumulated with
-    per-tick discounting so it can be credited as a single value to the FPS
-    decision that produced it. `info["window_duration"]` reports how many
-    physics ticks the window actually ran (<=obs_interval, shorter on early
-    termination), for gamma**duration cross-window GAE bootstrapping in the
-    training loop.
+    window. The FPS action chosen at the start of a window sets obs_interval (the
+    window length in physics ticks); NavModel drives the whole window on the
+    observation sampled at the window's start -- held fixed and refreshed only
+    once the window ends -- and in-window reward is accumulated with per-tick
+    discounting so it can be credited as a single value to the FPS decision that
+    produced it. `info["window_duration"]` reports how many physics ticks the
+    window actually ran (<=obs_interval, shorter on early termination), for
+    gamma**duration cross-window GAE bootstrapping in the training loop.
+
+    Same CautiousVars pipeline (11-dim + 3 augmented) as AdaptiveFPS_TrackAware_
+    Wrapper (the per-tick sibling in adaptive_fps_track_aware_wrapper.py), and
+    relies on CarRacing_VarFramerate (envs/car_racing_var_fps.py) for the
+    off-track penalty / curve-passed bonus / wrong-direction / stalled / off-
+    track-timeout termination shaping already baked into nav_reward -- frame_cost
+    and the budget-overrun penalty are the only reward terms this wrapper adds
+    itself, both charged once per decision/window. Unlike the per-tick wrapper,
+    there's no separate wrapper-level goal-distance check here: CarRacing_
+    VarFramerate's own lap_finished/tile-progress logic already covers "reached
+    the end of the track," so this wrapper doesn't duplicate it.
     """
     def __init__(self, env, nav_model_path, device, frame_cost=0.0, budget=50,
                  gamma=0.99, max_physics_steps=1000):
@@ -85,10 +94,14 @@ class AdaptiveFPS_Cautious_SMDP_Wrapper(gym.Wrapper):
             self.navigation_model = None
         self.navigation_action_space = spaces.Discrete(4)
 
-        # Cautious Variables Class
+        # Cautious Variables Class -- same 11-dim layout as the per-tick wrapper:
+        # vx, vy, dist_to_curve, curve_severity, heading_alignment, cross_track,
+        # cross_track_rate, off_track, time_off_track, episode_completion, curves_passed.
+        # No raw (x, y), no time_to_curve, no frame_counter (that's in the augmented
+        # block below, same as the per-tick wrapper).
         self.cautious_sensors = CautiousVars()
-        self.n_cautious = 8
-        self.n_scalars = 3  # obs_age_ratio, fps_ratio, episode_frame_count
+        self.n_cautious = 11
+        self.n_scalars = 3  # window_duration_ratio, fps_ratio, frame_counter
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.n_cautious + self.n_scalars,), dtype=np.float32
         )
@@ -97,27 +110,17 @@ class AdaptiveFPS_Cautious_SMDP_Wrapper(gym.Wrapper):
         self.world_step_count = 0
         self.current_fps = self.simulation_fps
         self.obs_interval = 1
-        self.fps_penalty = 0.0
         self.current_obs = None
         self.last_sampled_obs = None
 
     def reset(self, *, seed=None, options=None):
         observed_frame, info = self.env.reset(seed=seed, options=options)
-        track = np.asarray(self.env.unwrapped.track, dtype=np.float32)
 
         self.world_step_count = 0
         self.episode_frame_count = 1
-        self.fps_penalty = 0.0
         self.current_fps = self.fps_choices[-1]          # start at fastest (50)
         self.obs_interval = int(self.simulation_fps / self.current_fps)
-        self.reached_goal = False
         self.budget_pen_check = False
-
-        # Goal Settings:
-        self.goal_frac   = 0.95
-        self.goal_xy     = track[int(self.goal_frac * len(track)), 2:4]
-        self.goal_radius = 20.0
-        self.min_steps   = 20
 
         # NavModel always predicts off last_sampled_obs, held fixed for the entire
         # window -- only refreshed at a window boundary (see step()).
@@ -126,20 +129,25 @@ class AdaptiveFPS_Cautious_SMDP_Wrapper(gym.Wrapper):
 
         # Cautious Variables
         self.cautious_sensors.reset_track_reading(self.env)
-        self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(self.env)
+        # dt_ticks=0: first reading of the episode, no prior tick to diff/accumulate against
+        self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(self.env, dt_ticks=0)
 
         # ticks_in_window is 0 here -- no window has executed yet at reset
         self.cautious_obs = self._get_augmented_obs(self.last_sampled_cautious_obs, ticks_in_window=0)
         return self.cautious_obs, info
 
     def _get_augmented_obs(self, cautious_obs, ticks_in_window):
-        # obs_age_ratio reflects how long the *just-completed* decision window was --
-        # the FPS policy is only ever queried on fresh, window-boundary observations
-        obs_age_ratio = ticks_in_window / self.simulation_fps
+        # window_duration_ratio reflects how long the *just-completed* decision window
+        # was -- the FPS policy is only ever queried at window boundaries, so this plays
+        # the same role obs_age_ratio plays in the per-tick wrapper.
+        window_duration_ratio = ticks_in_window / self.simulation_fps
         fps_ratio = self.current_fps / self.simulation_fps
+        # how many decisions spent out of budget -- clean 0->1 ramp that hits 1.0
+        # exactly when the budget-overrun penalty (below) is about to fire
+        frame_counter = np.clip(self.episode_frame_count / self.budget, 0, 1)
         return np.concatenate([
             cautious_obs,
-            np.array([obs_age_ratio, fps_ratio, self.episode_frame_count], dtype=np.float32),
+            np.array([window_duration_ratio, fps_ratio, frame_counter], dtype=np.float32),
         ])
 
     def step(self, fps_action):
@@ -171,13 +179,6 @@ class AdaptiveFPS_Cautious_SMDP_Wrapper(gym.Wrapper):
             discount *= self.gamma
             ticks_in_window += 1
 
-            # Goal check — every physics tick, not just at window boundaries
-            x, y = self.env.unwrapped.car.hull.position
-            self.reached_goal = (np.hypot(x - self.goal_xy[0], y - self.goal_xy[1]) < self.goal_radius) \
-                    and (self.world_step_count > self.min_steps)
-            if self.reached_goal:
-                terminated = True
-
             if self.world_step_count >= self.max_physics_steps:
                 truncated = True
 
@@ -192,20 +193,37 @@ class AdaptiveFPS_Cautious_SMDP_Wrapper(gym.Wrapper):
         # for the duration of the window that just ran.
         self.last_sampled_obs = self.current_obs.copy()
         self.episode_frame_count += 1
-        self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(self.env)
+        self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(self.env, dt_ticks=ticks_in_window)
 
         # Sampling cost — charged once per decision/window. Because a higher chosen
         # FPS means shorter windows (more decisions over a fixed episode length), a
         # flat per-window charge already penalizes higher sampling rates more.
-        frame_penalty = self.frame_cost
-        total_reward -= frame_penalty
-        self.fps_penalty += frame_penalty
+        total_reward -= self.frame_cost
 
-        if not self.reached_goal and self.episode_frame_count > self.budget and not self.budget_pen_check:
+        if self.episode_frame_count > self.budget and not self.budget_pen_check:
             total_reward += -100
             self.budget_pen_check = True
 
         self.cautious_obs = self._get_augmented_obs(self.last_sampled_cautious_obs, ticks_in_window)
+
+        # Consolidated debug field, same convention as AdaptiveFPS_TrackAware_Wrapper
+        # (minus reached_goal, which this wrapper doesn't track separately -- see class
+        # docstring). "off_playfield" is the implicit case: terminated=True but none of
+        # the env's other named flags fired.
+        if info.get("lap_finished"):
+            termination_reason = "lap_finished"
+        elif info.get("wrong_direction"):
+            termination_reason = "wrong_direction"
+        elif info.get("off_track_timeout"):
+            termination_reason = "off_track_timeout"
+        elif info.get("stalled"):
+            termination_reason = "stalled"
+        elif terminated:
+            termination_reason = "off_playfield"
+        elif truncated:
+            termination_reason = "timeout"
+        else:
+            termination_reason = "none"
 
         info = dict(info)
         info["reward"] = total_reward
@@ -217,6 +235,6 @@ class AdaptiveFPS_Cautious_SMDP_Wrapper(gym.Wrapper):
         info["window_duration"] = ticks_in_window
         info["physics_steps"] = self.world_step_count
         info["timeout"] = truncated and not terminated
-        info["reached_goal"] = self.reached_goal
+        info["termination_reason"] = termination_reason
 
         return self.cautious_obs, total_reward, terminated, truncated, info

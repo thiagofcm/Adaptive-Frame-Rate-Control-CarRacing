@@ -1,7 +1,17 @@
 # sweep config for the Adaptive-FPS SMDP (feedforward) frame_cost study.
-# Same schema/values as config_adaptive_fps_smdp_mlp.yaml for every key except
-# `sweep:`, which sweep.py takes the Cartesian product of to build one
-# materialized run config per combination.
+# Trains training/train_adaptive_fps_smdp_mlp.py on CarRacing_VarFramerate
+# (envs/car_racing_var_fps.py) + AdaptiveFPS_Cautious_SMDP_Wrapper
+# (wrappers/adaptive_fps_cautious_smdp_wrapper.py) -- one step() is one full
+# decision window (variable physics-tick length), trained with gamma**duration
+# cross-window GAE. Same 11-dim cautious + 3-dim augmented observation and reward
+# shaping (off-track penalty, curve-passed bonus, terminations) as the per-tick
+# LSTM sibling (train_adaptive_fps_track_aware_lstm.py) -- different decision
+# granularity, feedforward instead of recurrent (see train_adaptive_fps_smdp_mlp.py's
+# module docstring for why).
+#
+# Same schema/values as train_adaptive_fps_smdp_mlp.py's Args for every key except
+# `sweep:`, which training/sweep_adaptive_fps_smdp_mlp.py takes the Cartesian
+# product of to build one materialized run config per combination.
 seed: 1
 total_timesteps: 15_000_000
 learning_rate: 0.0003
@@ -11,27 +21,31 @@ gamma: 0.99
 gae_lambda: 0.98
 num_minibatches: 4
 update_epochs: 4
-ent_coef: 0.01
+ent_coef: 0.02
 vf_coef: 0.5
 clip_coef: 0.2
 max_grad_norm: 0.5
-anneal_lr: false
+anneal_lr: true
 norm_adv: true
 clip_vloss: true
-nav_model_path: "experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt"
+nav_model_path: "old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt"
 
-# Sampling cost: charged once per decision window (see train_mlp.py). budget is a
-# window count, not a wrapper-step count, so it isn't directly comparable to the
-# ep_counter sweep's 150 -- 100 is the untuned value carried over from the closest
-# existing SMDP reference (smdp/experiments/adaptive_fps_step_loop).
-budget: 150.0
+# No outer TimeLimit in this wrapper (unlike the per-tick sibling) -- episode length
+# is capped directly in physics ticks via max_physics_steps, comfortably above
+# STATIC_TIMEOUT_TICKS (400 in envs/car_racing_var_fps.py) so the stalled/off-track-
+# timeout terminations can fire.
 max_physics_steps: 1000
+# Decision budget in real windows (episode_frame_count), not physics ticks -- a
+# window can span 1-50 ticks depending on chosen FPS, so this isn't directly
+# comparable to a physics-tick count.
+budget: 200.0
 
-# Sweep combinations -- sweep.py builds the Cartesian product across these lists.
-# Same frame_cost grid as config/sweep_adaptive_fps_cautious_ep_counter.yaml, so
-# the two families are comparable point-for-point on this axis. frame_cost=0.0
-# isolates the budget constraint's effect on its own (no extra per-window penalty);
-# increasing it should push the policy toward lower average chosen FPS
-# (charts/mean_chosen_fps) at the cost of episodic_return.
+# Sweep combinations -- training/sweep_adaptive_fps_smdp_mlp.py builds the Cartesian
+# product across these lists. frame_cost is charged once per decision/window here,
+# the same semantic as the per-tick wrapper's "once per real sample" -- so the same
+# calibrated grid applies (see config/sweep_adaptive_fps_track_aware_lstm.yaml for
+# the empirical reasoning: fixed fps=50 vs fps=1 gave a ~1300-point driving-quality
+# gap from FPS choice alone, and the old frame_cost=0.02 default was too weak to
+# matter against that at all).
 sweep:
-  frame_cost: [0.0, 0.05, 0.1, 0.2, 0.4, 0.5, 1.0, 2.0]
+  frame_cost: [0.0, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0]

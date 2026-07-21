@@ -70,12 +70,12 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
         self.navigation_action_space = spaces.Discrete(4)
 
         # Cautious Variables Class
-        self.cautious_sensors = CautiousVars(budget=budget)
-        # vx, vy, dist_to_curve, time_to_curve, cross_track, off_track, curve_severity,
-        # cross_track_rate, heading_alignment, time_off_track, frame_counter,
-        # episode_completion, curves_passed -- see utils/cautious_variables.py:get_cautious_var().
-        # No raw (x, y) position.
-        self.n_cautious = 13
+        self.cautious_sensors = CautiousVars()
+        # vx, vy, dist_to_curve, curve_severity, heading_alignment, cross_track,
+        # cross_track_rate, off_track, time_off_track, episode_completion, curves_passed
+        # -- see utils/cautious_variables.py:get_cautious_var(). No raw (x, y) position,
+        # no time_to_curve, no frame_counter (that's in the augmented block below now).
+        self.n_cautious = 11
         self.n_scalars = 3
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.n_cautious + self.n_scalars,), dtype=np.float32)
 
@@ -117,12 +117,12 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
         # Cautious Variables
         self.cautious_sensors.reset_track_reading(self.env)
         # dt_ticks=0: first reading of the episode, no prior tick to diff/accumulate against
-        self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(
-            self.env, dt_ticks=0, episode_frame_count=self.episode_frame_count
-        )
+        self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(self.env, dt_ticks=0)
 
-        # Current obs here is the cautious var (12-dim) + 3 scalars
+        # Current obs here is the cautious var (11-dim) + 3 scalars
         self.current_obs = self._get_augmented_obs(self.last_sampled_cautious_obs)  # augmented (36866,) for the FPS policy
+        #print("RESET:")
+        #print(self.current_obs)
         return self.current_obs, info
   
     def _get_augmented_obs(self, obs):
@@ -132,10 +132,13 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
         obs_age_ratio = obs_age_steps / self.simulation_fps
         # normalizing the num of steps since last obs
         fps_ratio = self.current_fps/self.simulation_fps
+        # how many decisions spent out of budget -- clean 0->1 ramp that hits 1.0
+        # exactly when the budget-overrun penalty (below) is about to fire
+        frame_counter = np.clip(self.episode_frame_count / self.budget, 0, 1)
 
         aug_obs = np.concatenate([
             cautious_obs,
-            np.array([obs_age_ratio,fps_ratio, self.episode_frame_count], dtype=np.float32)])
+            np.array([obs_age_ratio, fps_ratio, frame_counter], dtype=np.float32)])
         return aug_obs
 
     def step(self, fps_action):
@@ -172,11 +175,7 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
             dt_ticks = self.steps_since_last_obs
             self.steps_since_last_obs = 0
             self.episode_frame_count += 1
-            # episode_frame_count passed post-increment, so frame_counter reflects the
-            # same count the budget-overrun check below will actually compare to budget.
-            self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(
-                self.env, dt_ticks=dt_ticks, episode_frame_count=self.episode_frame_count
-            )
+            self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(self.env, dt_ticks=dt_ticks)
             frame_consumed = True
 
             # Update FPS and obs_interval based on the action taken by the agent
@@ -218,6 +217,30 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
             terminated = True
             reward = 150
 
+        # Consolidated debug field: which single condition actually ended the episode.
+        # reached_goal takes priority since it's the wrapper's own success condition and
+        # can coincide with an env-reported flag on the same tick; among the env's own
+        # terminal flags, "off_playfield" is the implicit case (terminated=True but none
+        # of the other named flags fired -- see CarRacing_VarFramerate.step()). Note the
+        # budget-overrun penalty does NOT terminate the episode (it's a one-shot penalty,
+        # not a hard stop), so it never appears here even though it fires via reward.
+        if self.reached_goal:
+            termination_reason = "reached_goal"
+        elif info.get("lap_finished"):
+            termination_reason = "lap_finished"
+        elif info.get("wrong_direction"):
+            termination_reason = "wrong_direction"
+        elif info.get("off_track_timeout"):
+            termination_reason = "off_track_timeout"
+        elif info.get("stalled"):
+            termination_reason = "stalled"
+        elif terminated:
+            termination_reason = "off_playfield"
+        elif truncated:
+            termination_reason = "timeout"
+        else:
+            termination_reason = "none"
+
         info = dict(info)
         info["reward"] = reward
         info["nav_reward"] = nav_reward
@@ -227,5 +250,10 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
         info["episode_frame_count"] = self.episode_frame_count
         info["timeout"] = truncated and not terminated
         info["reached_goal"] = self.reached_goal
+        info["termination_reason"] = termination_reason
+        # Whether fps_action this tick was actually applied (a real sampling instant)
+        # or silently discarded (obs_interval not yet elapsed) -- see training loop's
+        # policy-loss masking, which must not train on discarded-action ticks.
+        info["frame_consumed"] = frame_consumed
 
         return self.current_obs, reward, terminated, truncated, info
