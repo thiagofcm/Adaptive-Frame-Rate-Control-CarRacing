@@ -38,7 +38,17 @@ class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
     seed: int = 1
-    """seed of the experiment"""
+    """seed of the experiment -- only used for policy/torch/numpy/random init, NOT for
+    track generation (see track_seed) so the FPS policy can't memorize a fixed tick-based
+    schedule tied to one track's curve locations"""
+    track_seed: int = None
+    """seed for the vectorized envs' very first procedural track generation, kept
+    independent of `seed`. None (default) -- draw from OS entropy, so even re-running the
+    same experiment `seed` starts on different tracks. Every episode after the first draws
+    its own fresh procedural track automatically regardless of this value (autoreset calls
+    env.reset() with no seed, which continues the env's own RNG stream rather than
+    reseeding -- see wrappers/pre_processing.py, which used to hardcode seed=1 here and
+    defeat this entirely)."""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
@@ -326,7 +336,7 @@ if __name__ == "__main__":
 
     # TRY NOT TO MODIFY: start the game
     start_time = time.time()
-    next_obs, _ = envs.reset(seed=args.seed)
+    next_obs, _ = envs.reset(seed=args.track_seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
 
@@ -393,7 +403,13 @@ if __name__ == "__main__":
                         # compute mean chosen fps for this episode
                         mean_fps = episode_fps_sum[i] / episode_fps_count[i] if episode_fps_count[i] > 0 else 0
 
-                        print(f"global_step={global_step} | return={ep_return:.2f} | steps={ep_length}")
+                        # track_hash identifies which procedurally generated track this
+                        # episode ran on -- printed (not a TB scalar, it's not numeric) so
+                        # the per-run log file (captured by the sweep launcher) can be
+                        # audited to confirm tracks are actually varying across episodes.
+                        track_hash = infos["track_hash"][i] if "track_hash" in infos else "?"
+
+                        print(f"global_step={global_step} | return={ep_return:.2f} | steps={ep_length} | track={track_hash}")
                         writer.add_scalar("charts/episodic_return", ep_return, global_step)
                         writer.add_scalar("charts/episodic_length", ep_length, global_step)
                         writer.add_scalar("charts/mean_chosen_fps", mean_fps, global_step)

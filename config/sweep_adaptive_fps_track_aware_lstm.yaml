@@ -12,13 +12,13 @@
 seed: 1
 total_timesteps: 15_000_000
 learning_rate: 0.0003
-num_envs: 8
-num_steps: 512
+num_envs: 16
+num_steps: 1024
 gamma: 0.99
 gae_lambda: 0.98
 num_minibatches: 4
 update_epochs: 4
-ent_coef: 0.02
+ent_coef: 0.03
 vf_coef: 0.5
 clip_coef: 0.2
 max_grad_norm: 0.5
@@ -47,4 +47,5 @@ budget: 180
 # frame_cost starts being comparable to the quality difference between *adjacent*
 # FPS choices (e.g. 50 vs 25); 1.0-2.0 should visibly dominate it.
 sweep:
-  frame_cost: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 2.0, 3.0, 10.0]
+  # frame_cost: [2.0, 2.1, 2.2, 2.3]
+  frame_cost: [1.2, 1.4, 1.6, 1.8, 2.0, 2.2]

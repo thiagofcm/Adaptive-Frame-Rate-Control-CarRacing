@@ -19,8 +19,6 @@ class CarRacingPreprocessing(gym.Wrapper):
         self.step_counter = 0
 
     def reset(self, *, seed=None, options=None):
-        # For using always the same track
-        seed = 1
         observation, info = self.env.reset(seed=seed, options=options)
         self.step_counter+=1
 

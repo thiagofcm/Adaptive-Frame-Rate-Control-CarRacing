@@ -107,7 +107,7 @@ def draw_cautious_overlay(frame_rgb, step, fps, fresh, cautious_vec, ret):
     return img
 
 
-def plot_track_fps(env, positions, fps_values, save_path, title=None):
+def plot_track_fps(env, wrapper, positions, fps_values, save_path, title=None):
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     track = np.asarray(env.unwrapped.track, dtype=np.float32)
     tx, ty = track[:, 2], track[:, 3]
@@ -123,8 +123,14 @@ def plot_track_fps(env, positions, fps_values, save_path, title=None):
     ax.plot(txc, tyc, color="0.75", lw=8, solid_capstyle="round", zorder=1)
     ax.plot(txc, tyc, "k--", lw=1, zorder=2)
     ax.scatter(traj[:, 0], traj[:, 1], c=idx, cmap=cmap, vmin=-0.5, vmax=len(FPS_CHOICES) - 0.5, s=12, zorder=3)
-    goal_xy = track[int(0.95 * len(track)), 2:4]
+    # Read the actual goal used by the wrapper this episode (arc-length-based,
+    # laps_required-aware -- see AdaptiveFPS_TrackAware_Wrapper.reset()), not a
+    # goal_frac*len(track) recomputation, which no longer matches what the wrapper
+    # itself checks against once a track needs more than one lap to reach goal_distance.
+    goal_xy, goal_radius = wrapper.goal_xy, wrapper.goal_radius
     ax.plot(goal_xy[0], goal_xy[1], "*", color="gold", ms=20, markeredgecolor="black", markeredgewidth=0.8, zorder=6)
+    ax.add_patch(plt.Circle((goal_xy[0], goal_xy[1]), goal_radius,
+                             fill=False, color="gold", lw=1.2, ls="--", zorder=6))
     ax.plot(traj[0, 0], traj[0, 1], "o", color="lime", ms=11, zorder=5)
     ax.plot(traj[-1, 0], traj[-1, 1], "X", color="red", ms=11, zorder=5)
     handles = [Line2D([0], [0], marker="o", linestyle="", markersize=8,
@@ -137,6 +143,10 @@ def plot_track_fps(env, positions, fps_values, save_path, title=None):
     ]
     ax.set_aspect("equal"); ax.axis("off")
     if title:
+        # laps_required > 1 means the trajectory has to pass through/near this same
+        # top-down region multiple times before "reached_goal" can fire -- worth
+        # surfacing in the title since the flat scatter alone doesn't show lap number.
+        title = f"{title}  (laps_required={wrapper.laps_required})"
         ax.set_title(title)
     fig.legend(handles=handles, loc="lower center", ncol=4, fontsize=8,
                bbox_to_anchor=(0.5, 0.0), frameon=True)
@@ -243,7 +253,7 @@ def main():
     print("FPS fraction:", {f: f"{fps_counter[f] / total:.1%}" for f in FPS_CHOICES})
 
     plot_track_fps(
-        env, positions, fps_values,
+        env, env.env, positions, fps_values,
         save_path=os.path.join(args.out_dir, "plots", f"plot_fps_{tag}_seed{args.seed}_ret{int(ep_return)}.png"),
         title=f"{tag}  return={ep_return:.0f}  len={ep_len}",
     )

@@ -1,0 +1,232 @@
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `track-seed` is annotated with type `<class 'int'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `wandb-entity` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `target-kl` is annotated with type `<class 'float'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `resume-path` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+Experiment info saved → runs/adaptive_fps_track_aware_lstm/CarRacing_VarFramerate_fc_0.1_bud_180_21-07-13-18-21/info_settings.txt
+Device: cpu
+Navigation model path: old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+Navigation Model loaded on cpu
+global_step=976 | return=2.69 | steps=61 | track=5e2d3abe0518da11278037338ed5b895
+global_step=1152 | return=19.61 | steps=72 | track=50cad0da3c936d89a0c0e2627734b446
+global_step=2080 | return=-133.70 | steps=130 | track=2dd99265d3b787f62482389668787de2
+global_step=2080 | return=-137.39 | steps=130 | track=e8380003a98bbd7fff70c30318882fba
+global_step=2080 | return=-127.68 | steps=130 | track=f0e2bbcb00767ce7d640b47717da5b35
+global_step=2080 | return=-132.10 | steps=130 | track=a702822a05fb93745cb55a5480d1d5b8
+global_step=2096 | return=-121.57 | steps=131 | track=fa4c7f1263930a5e73bf374c650066f8
+global_step=2096 | return=-134.76 | steps=131 | track=7d1caa7bf9f9b9e580dd14b70608d665
+global_step=2096 | return=-129.77 | steps=131 | track=474346e240036ffb515ce87c26a142f5
+global_step=2096 | return=-122.89 | steps=131 | track=bac047b37f04bb1be367a4cce974995b
+global_step=2096 | return=-133.56 | steps=131 | track=d8a37817401725a7c1870b9653ef0816
+global_step=2096 | return=-130.59 | steps=131 | track=71ea470df129a363bcfc5d44bb58df15
+global_step=2096 | return=-130.09 | steps=131 | track=9cfbb9620030a6f8789656037123f0a6
+global_step=2096 | return=47.80 | steps=58 | track=123ef85fa0f19ff7afb0d33124863442
+global_step=2304 | return=-134.56 | steps=144 | track=49683061be7bfb5f88175fbda3afb681
+global_step=2352 | return=-28.26 | steps=147 | track=883b2575b6df386be07b985a96e83309
+global_step=2368 | return=-45.48 | steps=148 | track=e3af5f467d649a5b3d99a0e7955e3a7f
+global_step=3088 | return=-129.35 | steps=131 | track=3871022b4d05c7a4f77ee8fee6c13f69
+global_step=3136 | return=15.70 | steps=65 | track=ae827f697b04e5ae9258fb11b04cc9e3
+global_step=3344 | return=-3.35 | steps=64 | track=9174192858ee22109b215ef1fbc4b618
+global_step=4192 | return=-138.97 | steps=130 | track=f7a7f59d8364a45ce512e05596f5b1fa
+global_step=4192 | return=-136.65 | steps=130 | track=78746dd9bf4d46743f18d2454d6f94b6
+global_step=4208 | return=-125.64 | steps=131 | track=0da290657f769f4a5268ab4b7d8373fd
+global_step=4208 | return=-91.78 | steps=131 | track=ee23f40d7c2385447742721c7db615f7
+global_step=4208 | return=-121.67 | steps=131 | track=a298f1dd4ef8f2bc667d6e3cd68e1d75
+global_step=4208 | return=-130.59 | steps=131 | track=7ab59825990d018fb031bf7d1a1b9dd8
+global_step=4432 | return=-127.57 | steps=129 | track=e2097790cdc4c4cc6045a734c8854c23
+global_step=4464 | return=-62.31 | steps=147 | track=aa988f27da380e5e346700c0c99e39b9
+global_step=4480 | return=-133.45 | steps=131 | track=a6d104521ff889a062a21c0d8d85aa7b
+global_step=4592 | return=-40.57 | steps=156 | track=f45f7f17ccd627a3bf47796009567836
+global_step=4720 | return=-37.97 | steps=164 | track=c376cb665d71df4af63f7292874f151a
+global_step=4864 | return=-97.43 | steps=172 | track=e93b44172ac15ad39143c71f17344905
+global_step=5088 | return=11.40 | steps=55 | track=f8f9e53bc65f5789890a6c2baf62bfca
+global_step=5200 | return=-128.53 | steps=131 | track=4834ed38bc377dddf35963314171ecf0
+global_step=5248 | return=-131.41 | steps=131 | track=8ca0e37be46de3032de043b42dcd7d25
+global_step=5344 | return=20.20 | steps=203 | track=bba41c0238fce6651ff5ea2b318ffce7
+global_step=5440 | return=-133.50 | steps=130 | track=6a2d99377646f0290bd66467514af0ec
+global_step=5616 | return=3.13 | steps=63 | track=2512bf4d1e65d3bf6b1515bc06626da4
+global_step=5664 | return=-49.06 | steps=49 | track=e74eb92793f96dcc6b3f7be8957e6aa7
+global_step=6304 | return=-125.48 | steps=131 | track=399b6b5f7d038f609adae76fccf09a0e
+global_step=6320 | return=-109.01 | steps=131 | track=07244b7086d5e10805c716a046cbcf22
+global_step=6320 | return=-125.18 | steps=131 | track=5a8c447a8098632916b5de205c0ecdd7
+global_step=6320 | return=-133.83 | steps=131 | track=9257e60c6003e4fe50e641d0e1f10c28
+global_step=6320 | return=-124.01 | steps=131 | track=2d19f79944cdf50ed8f868020695a946
+global_step=6576 | return=-128.93 | steps=131 | track=129df6124963597593934647d6c003d8
+global_step=6832 | return=-127.38 | steps=131 | track=20775ee2055a997eb195b6f498384d2d
+global_step=7008 | return=-20.67 | steps=160 | track=91ecdfe89aef02d5e0bdbf191c3c93cd
+global_step=7200 | return=-128.15 | steps=131 | track=e99c3cef0e22d92335046e221ec4a328
+global_step=7312 | return=-125.72 | steps=131 | track=33bcbc07988cc6afe0625003283eafe1
+global_step=7456 | return=-128.47 | steps=131 | track=30c80f70c9ed95c599651b08a641a199
+global_step=7664 | return=-46.71 | steps=150 | track=abbddeee8a4d38e912c315f036879c6e
+global_step=7728 | return=-113.17 | steps=131 | track=a2f9a9f1eb03317a080b23350a337727
+global_step=7776 | return=-127.26 | steps=131 | track=9445779449cbe89f572029dbf7d99fc3
+global_step=8048 | return=-47.30 | steps=45 | track=ad75eecd27f6bc0ca916ef7030049ddf
+global_step=8096 | return=-82.60 | steps=225 | track=4480a80834001c0977878698fb12c7e9
+global_step=8256 | return=-112.56 | steps=175 | track=41fb64e2e56393ead4d5a02cfe881359
+global_step=8272 | return=-61.07 | steps=50 | track=32ebfb2ce4d2856750e80bf70ebbe341
+global_step=8416 | return=-127.96 | steps=131 | track=6ef70ac94d791e6d23b3406d6f021cda
+global_step=8432 | return=-129.99 | steps=131 | track=8a33324f108a3ab7342526b289fb3868
+global_step=8432 | return=-136.05 | steps=131 | track=cb3611a0cbc9445b8a717ad777e476d6
+global_step=8432 | return=-138.34 | steps=131 | track=4c7df122a771f00e3101f83f0d0944e1
+global_step=8496 | return=-15.96 | steps=135 | track=215a695d9b6e0f8fcb06009ad3d787f0
+global_step=8688 | return=-132.40 | steps=131 | track=9d824d2a4d2f26fc61bc75a51eb84494
+global_step=8944 | return=-132.01 | steps=131 | track=ce95f19249f64fc6af840c66ab86d1ad
+global_step=9296 | return=-138.52 | steps=130 | track=5bc2cbdb564f14146a64a6a2c1a9ce0d
+global_step=9472 | return=-48.83 | steps=153 | track=5a2272b76ba65972523a174306049ab4
+global_step=9776 | return=-131.41 | steps=131 | track=51b9eb7bc906ca84f1b96af977237c4d
+global_step=9904 | return=-97.13 | steps=135 | track=d94dc22c91a4991da742863195074c3b
+global_step=10160 | return=-133.15 | steps=131 | track=8a16d590b2457a3d5ad1b44337e599f1
+global_step=10368 | return=-126.73 | steps=131 | track=f7c50090732720bd45c88d44fd3d044d
+global_step=10384 | return=-127.59 | steps=131 | track=822d72c318ea6363de62335c0f62c29d
+global_step=10416 | return=-69.35 | steps=144 | track=5afa442560f46c35569fe296d1ce8de0
+global_step=10528 | return=-129.55 | steps=131 | track=b1e67a1ad6f691cbe6b2113e0961638d
+global_step=10528 | return=-131.79 | steps=130 | track=ba4c934b4db581a28315d680f440242f
+global_step=10784 | return=-114.15 | steps=130 | track=b7f0b3fb40c4ae408ae5750ca3493bdb
+global_step=11008 | return=-123.84 | steps=156 | track=6a4796c69ad08163e5dbc45731e17953
+global_step=11056 | return=-47.34 | steps=163 | track=78d0e13353af975c4aea37dd4e42d8ce
+global_step=11104 | return=63.43 | steps=166 | track=380c8408651f33e04348fbda7298b57e
+global_step=11248 | return=-68.52 | steps=143 | track=dd82426cd43f42663b1b7266334f6660
+global_step=11408 | return=-133.39 | steps=131 | track=7d2b40587c99e6af6d09f06607407a31
+global_step=11584 | return=-126.80 | steps=131 | track=bbb5af2dc9073885a1c6edd9a79bc258
+global_step=11856 | return=-58.90 | steps=121 | track=b01ccaadf308b50b673ac4a5f63e0a01
+global_step=11888 | return=-126.96 | steps=131 | track=738b02a49e9402415c9e7c8e1673704c
+global_step=11888 | return=-85.01 | steps=93 | track=c0130348ea13fc3df0563b357fa214d0
+global_step=12272 | return=-131.51 | steps=131 | track=e53f511286baa29023aa752b793f2114
+global_step=12416 | return=40.90 | steps=62 | track=e448b5e69b93a634ced4cf222dbd43c8
+global_step=12480 | return=-124.55 | steps=131 | track=4f1ef86cdf4e8ce9301d3dbb1956575c
+global_step=12528 | return=-135.30 | steps=131 | track=33f717322ffacc0bb7621880d010ed86
+global_step=12624 | return=-127.48 | steps=130 | track=8272d9a01893ace623bf4ae115415fbd
+global_step=12624 | return=-135.08 | steps=130 | track=5f990f66c56ef210f8075ca739b1c2f9
+global_step=13008 | return=-80.71 | steps=138 | track=4e7b7810e6f00e57d5d8184f9c9c8429
+global_step=13120 | return=-128.15 | steps=131 | track=34f6aadf1c90f5ced18dbf12e2955b3c
+global_step=13152 | return=-128.31 | steps=130 | track=360fa189b601d1d3e71a9da2fb4c1e78
+global_step=13216 | return=-130.70 | steps=131 | track=8b1221295d45cc5b66b71e4e1ced40da
+global_step=13408 | return=-182.83 | steps=351 | track=8746936ff649578b250988f9de934d52
+global_step=13424 | return=-11.38 | steps=62 | track=fc64eabab6b61f79a7962c7ff2d5b5ef
+global_step=13488 | return=-82.78 | steps=118 | track=939c7b19f0a014da030c7e0892d12c0c
+global_step=13520 | return=165.62 | steps=101 | track=a8f83c1c204586a5cf5b05d474009f85
+global_step=13968 | return=-123.60 | steps=131 | track=1fa26b914e8d6e368c3f8931c9b65dbe
+global_step=14064 | return=-96.24 | steps=175 | track=b2eaf08676ced4638ad63501fe4a7398
+global_step=14096 | return=-10.86 | steps=67 | track=679b5d0400c4646b4e7c87270c87dac1
+global_step=14352 | return=-19.79 | steps=153 | track=dc002a120ee08dc62dd7931843c789b4
+global_step=14480 | return=6.77 | steps=66 | track=b4192c05592c98f074930fcbd72c9bd1
+global_step=14528 | return=-17.72 | steps=62 | track=db3cc3063973320b6913896a281753ff
+global_step=14576 | return=-128.65 | steps=130 | track=ff6b8bc3f066c7d13de5aa0e7493cc2b
+global_step=14640 | return=-134.71 | steps=131 | track=4d1bcc269871fe4198ac676c448d5a06
+global_step=14720 | return=-131.68 | steps=130 | track=6a0bb5db8c739096a0f7988ed089c69b
+global_step=14736 | return=-131.51 | steps=131 | track=21e5937c6f929b7d229c537a94cacd3d
+global_step=14784 | return=-48.85 | steps=156 | track=bcbdea04c3657e99e25faf6e1da459bf
+global_step=15088 | return=-8.34 | steps=63 | track=71825815d6a0765d0f03a85278e0e534
+global_step=15232 | return=-125.66 | steps=131 | track=2340a8749265c2be3bba373f447b2225
+global_step=15264 | return=-126.00 | steps=131 | track=2440f38bbfbae404d31bdea8d15117a3
+global_step=15312 | return=-126.08 | steps=130 | track=641140bbd8f5338765b9d758e91d5afa
+global_step=15536 | return=-124.91 | steps=131 | track=d409922f48ebd9000816817dcaacfde6
+global_step=15600 | return=-135.37 | steps=131 | track=09bc5d9c25fb858ac68c5eacfd0796ea
+global_step=15664 | return=21.38 | steps=67 | track=5fed22a8e7cd9946ff0a9d1a000a2d3e
+global_step=15840 | return=42.50 | steps=69 | track=f7552051b8865df6e6d5c8a14e8f5f8e
+global_step=16080 | return=-123.76 | steps=131 | track=52235e693ef039fbb77e777a7d981a43
+global_step=16208 | return=-127.47 | steps=131 | track=325aa70a3f7b2e14ecb5982dbd343b8a
+global_step=16352 | return=8.73 | steps=67 | track=e259a11a551c8bcc40260ea7bc0fe1d6
+global_step=16384, SPS=100
+global_step=16464 | return=-125.10 | steps=131 | track=dd8f0c6969739d523f8d3175e7969cdc
+global_step=16592 | return=-135.30 | steps=131 | track=03fceb98558a2c1249a966ff94f69231
+global_step=16656 | return=-24.34 | steps=50 | track=0710cad760761c5c7336063e2fc5f59d
+global_step=16736 | return=-130.34 | steps=130 | track=babbb99ef7f1bf99155b2bd41fdba10f
+global_step=17184 | return=-77.49 | steps=149 | track=bcbe55becd33f7fd9a2f95dc8fdc20cf
+global_step=17200 | return=-126.47 | steps=131 | track=97628278079647eaaed21c3bf916aa3e
+global_step=17216 | return=-17.31 | steps=154 | track=0fc3bb76658f678a88b7e4298b621515
+global_step=17328 | return=-131.90 | steps=130 | track=3bd4acc6d4539d0689f3e68b16bc1062
+global_step=17472 | return=10.76 | steps=62 | track=ca5cf269a7f29f0a9ea00d12da4ad81d
+global_step=17632 | return=-131.06 | steps=130 | track=b1d9625a605ec81e342f267d2b37dbda
+global_step=17712 | return=-52.09 | steps=149 | track=5d58daf82dade67f612d0040d791cec4
+global_step=17712 | return=-108.25 | steps=131 | track=6279304142d21af164245bea143314f1
+global_step=17936 | return=9.15 | steps=83 | track=4f28759aa92f52c5f05be4100b4e6405
+global_step=18048 | return=-65.75 | steps=148 | track=6f9eb7251e96546f15a2221236622e48
+global_step=18192 | return=-118.97 | steps=131 | track=80a0acdad696310ab3131f6b344787a0
+global_step=18240 | return=-54.00 | steps=117 | track=84cef155e6b268c7629b2b276ad865da
+global_step=18320 | return=-124.36 | steps=131 | track=86427c10780a0b89c9149de33816ef19
+global_step=18384 | return=69.05 | steps=72 | track=38ddfc57d70ee2aadae845a5c73c5187
+global_step=18416 | return=-13.89 | steps=67 | track=7a32fd17eb43fde4959760d82b600991
+global_step=18752 | return=-137.92 | steps=130 | track=2a390502c4585a195609647b016af7c2
+global_step=18976 | return=-107.87 | steps=277 | track=6840cc2cd9423cdf7f4f2bdd87a0b31f
+global_step=19232 | return=-18.58 | steps=155 | track=5dd298d4f5d53896189026f10cca05c7
+global_step=19296 | return=-120.56 | steps=131 | track=ddafad32c001a9fb636cd3f45d3f5985
+global_step=19424 | return=30.99 | steps=68 | track=318282443922dc1d5887164500a2ee8b
+global_step=19584 | return=-127.03 | steps=131 | track=4c51026398f4fc4d36e38d8678652b88
+global_step=19744 | return=-123.50 | steps=131 | track=e7e68c1aa4b4f62639a6a61350982031
+global_step=19792 | return=-19.42 | steps=161 | track=ad260db5ec1cce1388dbbaa339ae878d
+global_step=19824 | return=-126.23 | steps=131 | track=3bd2604b78c3531629c0ff118408af34
+global_step=19824 | return=-128.93 | steps=131 | track=1bc1383e2f33720352e81b0a3e0a2a53
+global_step=20080 | return=-50.40 | steps=133 | track=1becedb773e467c6efde837d96b6bc1f
+global_step=20144 | return=-74.50 | steps=109 | track=eb9e98027295c2788d63e3f2dd53a5de
+global_step=20192 | return=33.29 | steps=133 | track=0e3557a76697b83d70b56822353d3a0a
+global_step=20304 | return=-123.80 | steps=131 | track=8bd45e79125c1176ced72b3dec73fa8a
+global_step=20336 | return=-127.91 | steps=130 | track=2e08a9e34c6444b6c6aac239674e21f0
+global_step=20528 | return=-137.38 | steps=131 | track=008c87183bd97bdd564fa8469d4ff8e3
+global_step=20816 | return=0.03 | steps=66 | track=afc60c326b9549b0a533841a9df78bfc
+global_step=20944 | return=-61.57 | steps=122 | track=d09879dee9fa02369d66c932f51965d2
+global_step=21184 | return=8.24 | steps=64 | track=147f91c434ce2c9f422706ae591e15ee
+global_step=21248 | return=-19.35 | steps=155 | track=12a776477e248f8df47a3213fea12fc3
+global_step=21328 | return=-131.28 | steps=130 | track=4e03d85a75044991db7ff34f68ff2dca
+global_step=21408 | return=-140.03 | steps=131 | track=15cec22e1893bddfcd826af86f649710
+global_step=21536 | return=-134.09 | steps=131 | track=bb9b6f8096c4e1ed27d619c45adafb3e
+global_step=21696 | return=-128.23 | steps=131 | track=a68e63f3077dd122134bb70a1838d731
+global_step=21936 | return=-137.48 | steps=131 | track=eecec9be86036b37bf219b6d6a63feb0
+global_step=21936 | return=-124.90 | steps=131 | track=3845d093a68631f0bed64690e3086f85
+global_step=22112 | return=-45.43 | steps=43 | track=21551f7cc53b93a2ec4c464049ffd218
+global_step=22192 | return=-127.13 | steps=131 | track=9ab4d8f5e5d635949f959cb6e99cfd95
+global_step=22288 | return=-7.44 | steps=68 | track=17c64cfcffbc94aac0c54a8c8a7a34bd
+global_step=22288 | return=-135.35 | steps=130 | track=3e14005d388c226087c329852a56348d
+global_step=22416 | return=-120.26 | steps=131 | track=51967464eafa38d8dc57e6382d2b47d8
+global_step=22448 | return=-140.80 | steps=131 | track=fb65a9ee69ee674638a3b7026a1b6daa
+global_step=22624 | return=-132.70 | steps=130 | track=25128a529be6ec97c1adece1bb066e77
+global_step=23168 | return=9.25 | steps=65 | track=5be1c958b008941f48f3ae017550457e
+global_step=23232 | return=-165.16 | steps=214 | track=cd3f8b539f01aa3f35f733acd4368ba9
+global_step=23296 | return=-37.52 | steps=154 | track=0fd41bf3d323e52e404fb5dc2f343cc7
+global_step=23328 | return=-130.79 | steps=129 | track=04e4f8af2cbc78dc1eecd5738564b98a
+global_step=23440 | return=-18.28 | steps=155 | track=2501b252f38dc5298c37b7d648985d8c
+global_step=23440 | return=-131.31 | steps=131 | track=96c2df9edaea6f12f3081ee09fb99947
+global_step=23600 | return=10.14 | steps=87 | track=43c9a089f16d2beb21f481745bb3cc1e
+global_step=23648 | return=-130.79 | steps=131 | track=3ee2f7ddeee15dccc62c02b79aeca7f5
+global_step=23792 | return=-135.04 | steps=130 | track=48f003573e0ffb7fa13234221b5f1aa9
+global_step=24048 | return=-111.40 | steps=131 | track=60c6cb7e1a940758dcbfb6e5701703cd
+global_step=24048 | return=-124.75 | steps=131 | track=26482459c54c3f92abbc2d90e53bed21
+Traceback (most recent call last):
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/training/train_adaptive_fps_track_aware_lstm.py", line 371, in <module>
+    next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+                                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/vector/async_vector_env.py", line 393, in step
+    return self.step_wait()
+           ^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/vector/async_vector_env.py", line 452, in step_wait
+    env_step_return, success = pipe.recv()
+                               ^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/multiprocessing/connection.py", line 250, in recv
+    buf = self._recv_bytes()
+          ^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/multiprocessing/connection.py", line 430, in _recv_bytes
+    buf = self._recv(4)
+          ^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/multiprocessing/connection.py", line 395, in _recv
+    chunk = read(handle, remaining)
+            ^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
