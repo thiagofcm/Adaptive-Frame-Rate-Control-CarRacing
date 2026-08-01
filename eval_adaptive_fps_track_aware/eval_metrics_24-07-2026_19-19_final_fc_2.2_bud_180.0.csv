@@ -1,0 +1,7 @@
+condition,n_episodes,mean_return,mean_frames_consumed,nav_reward_mean,reached_goal_rate,budget_overrun_rate,time_off_track,fps_mix
+adaptive_final,100,618.821,116.41,759.949,0.77,0.0,0.1715,"fps1=0%,fps5=0%,fps25=98%,fps50=2%"
+fixed_fps1,100,-118.665,4.07,-111.911,0.0,0.0,0.7577,fps1=100%
+fixed_fps5,100,-64.376,13.28,-37.36,0.0,0.0,0.5164,fps5=100%
+fixed_fps10,100,-57.821,37.18,17.311,0.03,0.0,0.5529,fps10=100%
+fixed_fps25,100,652.502,119.28,784.744,0.87,0.0,0.1604,fps25=100%
+fixed_fps50,100,523.657,195.3,902.866,0.92,0.04,0.0696,fps50=100%

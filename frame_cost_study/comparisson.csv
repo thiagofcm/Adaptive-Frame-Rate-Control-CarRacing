@@ -1,0 +1,15 @@
+condition,frame_cost,mean_return,mean_frames_consumed,nav_reward_mean,reached_goal_rate,budget_overrun_rate,n_episodes,fps_mix
+heuristic,2.2,660.382,176.14,906.39,0.95,0.01,100,"fps25=18%,fps50=82%"
+fps50,2.2,612.515,193.89,906.573,0.91,0.04,100,fps50=100%
+fps25,2.2,642.459,118.74,776.187,0.85,0.0,100,fps25=100%
+fps10,2.2,-51.695,38.93,29.451,0.03,0.0,100,fps10=100%
+fps5,2.2,-60.728,13.79,-30.39,0.0,0.0,100,fps5=100%
+fps1,2.2,-117.02,4.07,-108.066,0.0,0.0,100,fps1=100%
+
+condition,frame_cost,mean_return,mean_frames_consumed,nav_reward_mean,reached_goal_rate,budget_overrun_rate,n_episodes,fps_mix
+heuristic,2.0,695.61,176.14,906.39,0.95,0.01,100,"fps25=18%,fps50=82%"
+fps50,2.0,651.293,193.89,906.573,0.91,0.04,100,fps50=100%
+fps25,2.0,666.207,118.74,776.187,0.85,0.0,100,fps25=100%
+fps10,2.0,-43.909,38.93,29.451,0.03,0.0,100,fps10=100%
+fps5,2.0,-57.97,13.79,-30.39,0.0,0.0,100,fps5=100%
+fps1,2.0,-116.206,4.07,-108.066,0.0,0.0,100,fps1=100%

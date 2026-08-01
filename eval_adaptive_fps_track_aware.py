@@ -23,9 +23,21 @@ Reference/pattern followed: old/experiments/highest_fps_cautious/eval_highest.py
 """
 import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+# Each --workers subprocess (run_metrics_mode) runs a single episode's
+# env.step()/NavModel-or-Agent forward loop -- no benefit from internal BLAS/OpenMP
+# multithreading, only oversubscription against the other workers. Must be set
+# before numpy/torch import (bit us once already in frame_cost_calibration.py).
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import argparse
+import contextlib
+import csv
+from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import torch
+torch.set_num_threads(1)
 import gymnasium as gym
 from gymnasium.wrappers import TimeLimit
 import cv2
@@ -40,9 +52,27 @@ import envs.car_racing_var_fps  # noqa: F401 -- registers "CarRacing_VarFramerat
 from wrappers.pre_processing import CarRacingPreprocessing
 from wrappers.adaptive_fps_track_aware_wrapper import AdaptiveFPS_TrackAware_Wrapper
 from training.train_adaptive_fps_track_aware_lstm import Agent as AdaptiveAgent
+from utils.cautious_variables import OFF_TRACK_WHEEL_THRESHOLD
 
 FPS_CHOICES = [1, 5, 10, 25, 50]
 NAV_MODEL_PATH = "old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt"
+
+# --n-episodes (batch metrics) mode config -- deliberately plain constants, not
+# argparse flags, so a run can't accidentally use a different seed group or skip the
+# baselines just because a CLI flag was passed (or forgotten) differently between
+# invocations. Edit these directly to change behavior.
+RUN_SEED = 42                    # first seed of the batch; seeds are RUN_SEED..RUN_SEED+N_EPISODES-1,
+                                  # always -- decoupled from --seed (which only affects single-episode mode)
+EVALUATE_FIXED_BASELINES = False  # set False to skip the 5 fixed-FPS baselines and only evaluate the
+                                  # requested primary condition (adaptive ckpt or one fixed FPS)
+
+# Must match the 11-dim layout returned by CautiousVars.get_cautious_var() -- note
+# frame_counter is NOT in here, it's in the wrapper's augmented block (last 3 obs dims).
+CAUTIOUS_LABELS = [
+    "vx", "vy", "dist_to_curve", "curve_severity", "heading_alignment", "cross_track",
+    "cross_track_rate", "off_track", "time_off_track",
+    "episode_completion", "curves_passed",
+]
 
 # Must match the 11-dim layout returned by CautiousVars.get_cautious_var() -- note
 # frame_counter is NOT in here, it's in the wrapper's augmented block (last 3 obs dims).
@@ -60,8 +90,14 @@ def make_eval_env(env_id, nav_model_path, frame_cost, budget, max_episode_steps)
     env = CarRacingPreprocessing(env, skip_frames=4, stack_frames=4)
     # NavModel stays on CPU regardless of --device: single-sample inference every
     # physics tick is dominated by call overhead, not compute, so CPU is faster here.
-    env = AdaptiveFPS_TrackAware_Wrapper(env, nav_model_path, device="cpu",
-                                          frame_cost=frame_cost, budget=budget)
+    # NavModel.__init__ prints "Navigation Model loaded on {device}" -- harmless for
+    # a single interactive run, just noise once this fires once per episode in
+    # --n-episodes mode (up to hundreds of times across workers). Suppressed here
+    # rather than in the wrapper, which other callers (training script,
+    # frame_cost_calibration.py) may still want it from.
+    with open(os.devnull, "w") as _devnull, contextlib.redirect_stdout(_devnull):
+        env = AdaptiveFPS_TrackAware_Wrapper(env, nav_model_path, device="cpu",
+                                              frame_cost=frame_cost, budget=budget)
     env = TimeLimit(env, max_episode_steps=max_episode_steps)
     return env
 
@@ -76,6 +112,207 @@ def load_adaptive_agent(ckpt_path, device):
     agent.load_state_dict(sd)
     agent.eval()
     return agent
+
+
+class FixedFPSSelector:
+    """No state -- always the same FPS action, matches --fixed-fps single-episode mode."""
+    def __init__(self, fps):
+        self.action = FPS_CHOICES.index(fps)
+
+    def reset(self):
+        pass
+
+    def select(self, obs):
+        return self.action
+
+
+class AdaptiveSelector:
+    """Wraps the LSTM Agent + its hidden state, which must be reset fresh at the
+    start of every episode (unlike the original single-episode main(), which only
+    ever ran one episode so never needed to)."""
+    def __init__(self, agent, device):
+        self.agent = agent
+        self.device = device
+        self.lstm_state = None
+        self.done = None
+
+    def reset(self):
+        self.lstm_state = (
+            torch.zeros(self.agent.lstm.num_layers, 1, self.agent.lstm.hidden_size).to(self.device),
+            torch.zeros(self.agent.lstm.num_layers, 1, self.agent.lstm.hidden_size).to(self.device),
+        )
+        self.done = torch.zeros(1).to(self.device)
+
+    def select(self, obs):
+        obs_t = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+        with torch.no_grad():
+            a, _, _, _, self.lstm_state = self.agent.get_action_and_value(
+                obs_t, self.lstm_state, self.done, deterministic=True
+            )
+        return int(a.item())
+
+
+def run_episode_for_metrics(env, seed, selector):
+    """One episode, no rendering/video -- just the metrics needed for the batch CSV."""
+    obs, _ = env.reset(seed=seed)
+    selector.reset()
+    total_reward = 0.0
+    nav_reward_sum = 0.0
+    off_track_ticks = 0
+    tick_count = 0
+    done = False
+    info = {}
+    fps_decision_counts = {fps: 0 for fps in FPS_CHOICES}
+
+    while not done:
+        action = selector.select(obs)
+        obs, r, term, trunc, info = env.step(action)
+        total_reward += r
+        nav_reward_sum += info["nav_reward"]
+        tick_count += 1
+        done = term or trunc
+
+        if info["frame_consumed"]:
+            fps_decision_counts[int(info["chosen_fps"])] += 1
+
+        # Off-track duration metric: reuses CautiousVars' own OFF_TRACK_WHEEL_THRESHOLD
+        # (>=N/4 wheels off road) so this matches what the policy's own "off_track"/
+        # "time_off_track" observation features are trained to perceive. This is a
+        # simple per-episode aggregate (fraction of ticks off-track), distinct from
+        # CautiousVars' own per-tick normalized/decaying "time_off_track" feature.
+        off_track_wheel_count = sum(len(w.tiles) == 0 for w in env.unwrapped.car.wheels)
+        if off_track_wheel_count >= OFF_TRACK_WHEEL_THRESHOLD:
+            off_track_ticks += 1
+
+    frame_count = info["episode_frame_count"]
+    successful = bool(info["reached_goal"])
+    return {
+        "total_reward": total_reward,
+        "nav_reward": nav_reward_sum,
+        "frame_count": frame_count,
+        "successful": successful,
+        "budget_overrun": (not successful) and frame_count > info["budget"],
+        "time_off_track": (off_track_ticks / tick_count) if tick_count > 0 else 0.0,
+        "fps_decision_counts": fps_decision_counts,
+    }
+
+
+def aggregate_metrics(episodes):
+    total_decisions = {fps: sum(e["fps_decision_counts"][fps] for e in episodes) for fps in FPS_CHOICES}
+    grand_total = sum(total_decisions.values())
+    fps_mix = {fps: (total_decisions[fps] / grand_total if grand_total > 0 else 0.0) for fps in FPS_CHOICES}
+    return {
+        "n_episodes": len(episodes),
+        "mean_return": np.mean([e["total_reward"] for e in episodes]),
+        "mean_frames_consumed": np.mean([e["frame_count"] for e in episodes]),
+        "nav_reward_mean": np.mean([e["nav_reward"] for e in episodes]),
+        "reached_goal_rate": np.mean([e["successful"] for e in episodes]),
+        "budget_overrun_rate": np.mean([e["budget_overrun"] for e in episodes]),
+        "time_off_track": np.mean([e["time_off_track"] for e in episodes]),
+        "fps_mix": fps_mix,
+    }
+
+
+def fps_mix_str(fps_mix):
+    return ",".join(f"fps{fps}={frac:.0%}" for fps, frac in fps_mix.items() if frac > 0)
+
+
+def _metrics_worker(job):
+    """Top-level (picklable) per-(condition, seed) job for ProcessPoolExecutor --
+    same flattening pattern as frame_cost_study.py's _sweep_worker. Each worker
+    builds its own env + (for the adaptive condition) reloads its own copy of the
+    checkpoint, matching how NavModel is already reloaded per-worker in
+    frame_cost_calibration.py/frame_cost_study.py -- checkpoint loading is fast
+    next to a whole episode's physics/render cost, so this is negligible overhead.
+    """
+    (label, kind, param, seed, env_id, nav_model_path,
+     frame_cost, budget, max_episode_steps) = job
+    env = make_eval_env(env_id, nav_model_path, frame_cost, budget, max_episode_steps)
+    if kind == "adaptive":
+        agent = load_adaptive_agent(param, torch.device("cpu"))
+        selector = AdaptiveSelector(agent, torch.device("cpu"))
+    else:
+        selector = FixedFPSSelector(param)
+    stats = run_episode_for_metrics(env, seed, selector)
+    env.close()
+    return label, seed, stats
+
+
+def run_metrics_mode(args):
+    """--n-episodes > 1: no plot/video, just averaged metrics (matching the columns
+    in frame_cost_study.py's CSV, plus time_off_track) over N fixed seeds, for the
+    requested primary condition (adaptive ckpt or one fixed FPS) AND all 5 fixed-FPS
+    baselines under the exact same seeds, for direct comparison. Parallelized across
+    --workers subprocesses, one per (condition, seed) episode -- same proven pattern
+    as frame_cost_study.py's sweep mode."""
+    conditions = []  # list of (label, kind, param) -- kind is "adaptive" or "fixed"
+    if args.adaptive_ckpt is not None:
+        model_tag = os.path.splitext(os.path.basename(args.adaptive_ckpt))[0]
+        conditions.append((f"adaptive_{model_tag}", "adaptive", args.adaptive_ckpt))
+        primary_fixed = None
+    else:
+        model_tag = f"fixedfps{args.fixed_fps}"
+        primary_fixed = args.fixed_fps
+
+    if EVALUATE_FIXED_BASELINES:
+        for fps in FPS_CHOICES:
+            label = f"fixed_fps{fps}" + ("(primary)" if fps == primary_fixed else "")
+            conditions.append((label, "fixed", fps))
+    elif primary_fixed is not None:
+        # baselines toggled off, but a fixed FPS was requested directly as the
+        # primary condition -- still evaluate that one, just not the other 4.
+        conditions.append((f"fixed_fps{primary_fixed}(primary)", "fixed", primary_fixed))
+
+    # RUN_SEED is the module-level constant (not args.seed) -- see its definition
+    # for why: the batch seed group must never change between invocations.
+    N_EPISODES = args.n_episodes
+    seeds = range(RUN_SEED, RUN_SEED + N_EPISODES)
+
+    jobs = [
+        (label, kind, param, seed, args.env_id, args.nav_model_path,
+         args.fc, args.budget, args.max_episode_steps)
+        for (label, kind, param) in conditions
+        for seed in seeds
+    ]
+
+    print(f"[eval] running {len(jobs)} episodes across {args.workers} workers...")
+    grouped = {label: [] for label, _, _ in conditions}
+    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+        futures = [pool.submit(_metrics_worker, job) for job in jobs]
+        done = 0
+        for fut in as_completed(futures):
+            label, seed, stats = fut.result()
+            grouped[label].append(stats)
+            done += 1
+            # Jobs complete out of order across conditions once parallelized, unlike
+            # the old sequential-per-condition loop -- prefixed with [label] so the
+            # interleaved output stays readable. Otherwise identical to what you asked for.
+            print(f"  [{label}] Episode {seed - RUN_SEED + 1}/{N_EPISODES} | "
+                  f"reward={stats['total_reward']:.2f} | success={stats['successful']} | "
+                  f"frames={stats['frame_count']}")
+            if done % 25 == 0 or done == len(jobs):
+                print(f"[eval] {done}/{len(jobs)} episodes done")
+
+    # Iterate in `conditions` order (not dict insertion via completion) so the CSV
+    # rows come out in a stable, predictable order regardless of which finished first.
+    results = {label: aggregate_metrics(grouped[label]) for label, _, _ in conditions}
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    date_str = datetime.now().strftime("%d-%m-%Y_%H-%M")
+    csv_name = f"eval_metrics_{date_str}_{model_tag}_fc_{args.fc}_bud_{args.budget}.csv"
+    csv_path = os.path.join(args.out_dir, csv_name)
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["condition", "n_episodes", "mean_return", "mean_frames_consumed",
+                          "nav_reward_mean", "reached_goal_rate", "budget_overrun_rate",
+                          "time_off_track", "fps_mix"])
+        for label, s in results.items():
+            writer.writerow([label, s["n_episodes"], round(float(s["mean_return"]), 3),
+                              round(float(s["mean_frames_consumed"]), 3), round(float(s["nav_reward_mean"]), 3),
+                              round(float(s["reached_goal_rate"]), 4), round(float(s["budget_overrun_rate"]), 4),
+                              round(float(s["time_off_track"]), 4), fps_mix_str(s["fps_mix"])])
+
+    print(f"\n[eval] wrote {csv_path}")
 
 
 def draw_cautious_overlay(frame_rgb, step, fps, fresh, cautious_vec, ret):
@@ -166,8 +403,10 @@ def main():
 
     p.add_argument("--env-id", default="CarRacing_VarFramerate")
     p.add_argument("--nav-model-path", default=NAV_MODEL_PATH)
-    p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--frame-cost", type=float, default=0.0)
+    p.add_argument("--seed", type=int, default=1,
+                    help="single-episode mode only -- --n-episodes batch mode always uses the "
+                         "fixed RUN_SEED constant instead, regardless of this flag")
+    p.add_argument("--fc", type=float, default=0.0)
     p.add_argument("--budget", type=float, default=150)
     p.add_argument("--max-episode-steps", type=int, default=1000)
     p.add_argument("--out-dir", default="eval_adaptive_fps_track_aware")
@@ -175,9 +414,22 @@ def main():
     p.add_argument("--video-fps", type=int, default=30)
     p.add_argument("--display", action="store_true", help="show a live cv2 window while evaluating")
     p.add_argument("--no-cuda", action="store_true", help="force CPU for the adaptive-FPS agent")
+    p.add_argument("--n-episodes", type=int, default=1,
+                    help="if >1: run this many episodes (seeds --seed..--seed+n-1) per condition "
+                         "-- the requested primary (adaptive ckpt or one fixed FPS) plus all 5 "
+                         "fixed-FPS baselines -- and write an averaged-metrics CSV instead of a "
+                         "single episode's plot/video (see run_metrics_mode)")
+    p.add_argument("--workers", type=int, default=16,
+                    help="--n-episodes mode only: parallel worker processes, one per "
+                         "(condition, seed) episode -- same pattern as frame_cost_study.py")
     args = p.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
+
+    if args.n_episodes > 1:
+        run_metrics_mode(args)
+        return
+
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
 
     adaptive_agent = None
@@ -190,7 +442,7 @@ def main():
         )
         next_done = torch.zeros(1).to(device)
 
-    env = make_eval_env(args.env_id, args.nav_model_path, args.frame_cost, args.budget, args.max_episode_steps)
+    env = make_eval_env(args.env_id, args.nav_model_path, args.fc, args.budget, args.max_episode_steps)
     obs, _ = env.reset(seed=args.seed)
 
     positions, fps_values, frames = [], [], []
