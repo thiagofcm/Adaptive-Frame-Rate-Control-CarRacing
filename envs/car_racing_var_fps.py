@@ -75,7 +75,7 @@ STATIC_TIMEOUT_TICKS = 400
 # an independent, self-contained calibration from CautiousVars' curve_thresh (which is
 # a curvature RATE in rad/world-unit, not a raw per-segment angle), so the two are not
 # expected to draw region boundaries at exactly the same nodes.
-CURVE_TILE_TURN_THRESHOLD = 0.05
+CURVE_TILE_TURN_THRESHOLD = 0.04
 # Reward bonus paid once, on cleanly exiting a curve region (no off-track/wrong-direction
 # event while inside it) -- comparable to a handful of tiles' worth of +1000/N progress
 # reward, without dominating it or the -100 terminal penalties.
@@ -695,7 +695,7 @@ class CarRacing_VarFramerate(CarRacing):
                         self.curves_passed_count += 1
                         step_reward += CURVE_PASSED_BONUS
                         info["curve_passed"] = True
-                if self.in_curve and (off_track_wheels >= 3 or wrong_direction_now):
+                if self.in_curve and (off_track_wheels >= 2 or wrong_direction_now):
                     self.curve_clean = False
 
             # Stalled-car termination: note this counter also accumulates through

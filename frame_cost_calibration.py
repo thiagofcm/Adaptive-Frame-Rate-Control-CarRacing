@@ -81,7 +81,7 @@ def make_heuristic_action_fn(dist_thresh, severity_thresh):
     # tradeoff than the 50-vs-1 extreme swing tested in the first pass, which just
     # inherited FPS=1's poor driving quality whenever it wasn't near a curve.
     fast_idx = FPS_CHOICES.index(50)
-    slow_idx = FPS_CHOICES.index(10)
+    slow_idx = FPS_CHOICES.index(25)
 
     def action_fn(obs):
         close_to_curve = (obs[DIST_TO_CURVE_IDX] < dist_thresh) or (obs[CURVE_SEVERITY_IDX] > severity_thresh)

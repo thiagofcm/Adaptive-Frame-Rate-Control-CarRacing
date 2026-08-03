@@ -80,13 +80,19 @@ class NavModel:
         return action.cpu().numpy()[0], None
     
 class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
-    def __init__(self, env, nav_model_path, device, frame_cost=0.0, budget=50, goal_distance=900.0):
+    def __init__(self, env, nav_model_path, device, frame_cost=0.0, budget=50, goal_distance=900.0,
+                 goal_reward=150.0):
         super().__init__(env)
 
         # Variable Framerate Settings:
         self.simulation_fps= FPS
         self.frame_cost = frame_cost
         self.budget = budget
+        # Reward override on reaching the goal (see step()). Configurable so diagnostic
+        # scripts that care about pure driving-quality comparisons (not the lump-sum goal
+        # bonus) can zero it out -- default (150.0) preserves existing behavior for every
+        # other caller (training script, eval_adaptive_fps_track_aware.py, frame_cost_calibration.py).
+        self.goal_reward = goal_reward
         # Fixed absolute arc-length distance (world units, same scale as track x/y --
         # NOT a fraction of track point count) from the start line to the goal point.
         # Calibrated against 20 real generated tracks: total centerline arc length
@@ -307,7 +313,7 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
 
         if self.reached_goal:
             terminated = True
-            reward = 150
+            reward = self.goal_reward
 
         # Consolidated debug field: which single condition actually ended the episode.
         # reached_goal takes priority since it's the wrapper's own success condition and
