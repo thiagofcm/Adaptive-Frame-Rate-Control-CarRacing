@@ -31,7 +31,25 @@ from gymnasium.wrappers import TimeLimit
 from datetime import datetime
 from wrappers.pre_processing import CarRacingPreprocessing
 from wrappers.adaptive_fps_track_aware_wrapper import AdaptiveFPS_TrackAware_Wrapper
-import envs.car_racing_var_fps  # noqa: F401 -- import needed to register "CarRacing_VarFramerate"
+from wrappers.highest_fps_cautious import HighestFPS_Cautious_Wrapper
+from wrappers.adaptive_fps_random_initial_pos import AdaptiveFPS_Random_Initial_Pos
+import envs.car_racing_var_fps
+import envs.car_racing_var_fps_wo_time_pen  # noqa: F401 -- import needed to register "CarRacing_VarFramerate"
+import envs.car_racing_var_fps_random_start  # noqa: F401 -- registers "CarRacing_VarFramerate_RandomStart"
+
+# --env-id/--adaptive-fps-wrapper registry: which wrapper classes make_env() can select
+# by name (see Args.adaptive_fps_wrapper below). All three share the same
+# (env, nav_model_path, device, frame_cost, budget) constructor signature -- that's the
+# generic call make_env() uses. HighestFPS_Cautious_SL_Wrapper (wrappers/
+# highest_fps_cautious_step_loop.py) is deliberately NOT in this registry: its
+# constructor only takes (env, nav_model_path, device), no frame_cost/budget, so it
+# isn't compatible with the uniform call below without separate handling.
+ADAPTIVE_FPS_WRAPPERS = {
+    "AdaptiveFPS_TrackAware_Wrapper": AdaptiveFPS_TrackAware_Wrapper,
+    "AdaptiveFPS_Random_Initial_Pos": AdaptiveFPS_Random_Initial_Pos,
+    "HighestFPS_Cautious_Wrapper": HighestFPS_Cautious_Wrapper,
+    
+}
 
 @dataclass
 class Args:
@@ -66,6 +84,9 @@ class Args:
     env_id: str = "CarRacing_VarFramerate"
     """the id of the environment -- CarRacing_VarFramerate (envs/car_racing_var_fps.py) rather
     than stock CarRacing-v3, since that's where the off-track reward penalty now lives"""
+    adaptive_fps_wrapper: str = "AdaptiveFPS_TrackAware_Wrapper"
+    """which wrapper class wraps env_id -- one of ADAPTIVE_FPS_WRAPPERS' keys (see the
+    registry near the top of this file)"""
     total_timesteps: int = 15_000_000
     """total timesteps of the experiments"""
     learning_rate: float = 1e-4
@@ -126,11 +147,11 @@ class Args:
     ordering than Sync. Off by default until validated for long unattended runs;
     compare against Sync on the same config before trusting it for a real sweep."""
 
-def make_env(env_id, nav_model_path, frame_cost, budget, max_episode_steps, device):
+def make_env(env_id, adaptive_fps_wrapper_cls, nav_model_path, frame_cost, budget, max_episode_steps, device):
     def thunk():
         env = gym.make(env_id, continuous=False, render_mode="rgb_array")
         env = CarRacingPreprocessing(env, skip_frames=4, stack_frames=4)
-        env = AdaptiveFPS_TrackAware_Wrapper(env, nav_model_path, device, frame_cost, budget)
+        env = adaptive_fps_wrapper_cls(env, nav_model_path, device, frame_cost, budget)
         env = TimeLimit(env, max_episode_steps=max_episode_steps)
         # RecordEpisodeStatistics must wrap everything above -- it sums whatever reward
         # stream it wraps, and episodic_return should reflect the actual trained-on reward
@@ -284,8 +305,15 @@ if __name__ == "__main__":
     print(f"Device: {device}")
     print(f"Navigation model path: {nav_model_path}")
 
+    if args.adaptive_fps_wrapper not in ADAPTIVE_FPS_WRAPPERS:
+        raise ValueError(f"Unknown adaptive_fps_wrapper {args.adaptive_fps_wrapper!r} -- "
+                          f"must be one of {sorted(ADAPTIVE_FPS_WRAPPERS)}")
+    adaptive_fps_wrapper_cls = ADAPTIVE_FPS_WRAPPERS[args.adaptive_fps_wrapper]
+    print(f"Env: {args.env_id}  Wrapper: {args.adaptive_fps_wrapper}")
+
     # env setup
-    env_fns = [make_env(args.env_id, nav_model_path, args.frame_cost, args.budget, args.max_episode_steps, device)
+    env_fns = [make_env(args.env_id, adaptive_fps_wrapper_cls, nav_model_path, args.frame_cost,
+                         args.budget, args.max_episode_steps, device)
                for _ in range(args.num_envs)]
     if args.async_envs:
         # context="fork" explicitly rather than the platform default: fork (the Linux

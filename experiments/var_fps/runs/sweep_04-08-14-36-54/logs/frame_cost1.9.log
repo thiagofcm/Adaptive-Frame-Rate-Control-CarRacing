@@ -1,0 +1,32 @@
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `track-seed` is annotated with type `<class 'int'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `wandb-entity` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `target-kl` is annotated with type `<class 'float'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/tyro/_parsers.py:353: UserWarning: The field `resume-path` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+Experiment info saved → runs/adaptive_fps_track_aware_lstm/CarRacing_VarFramerate_WO_Time_Pen_fc_1.9_bud_180_04-08-14-36-59/info_settings.txt
+Device: cpu
+Navigation model path: experiments/navigation/CarRacing-v3__train__1__1785768450/final.pt
+Env: CarRacing_VarFramerate_WO_Time_Pen  Wrapper: AdaptiveFPS_TrackAware_Wrapper
+Traceback (most recent call last):
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/experiments/var_fps/train_adaptive_fps_track_aware_lstm.py", line 322, in <module>
+    envs = gym.vector.AsyncVectorEnv(env_fns, context="fork")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/vector/async_vector_env.py", line 155, in __init__
+    dummy_env = env_fns[0]()
+                ^^^^^^^^^^^^
+  File "/md0/home/UFAD/tcuevasmestanza/CarRacing/experiments/var_fps/train_adaptive_fps_track_aware_lstm.py", line 150, in thunk
+    env = gym.make(env_id, continuous=False, render_mode="rgb_array")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/envs/registration.py", line 682, in make
+    env_spec = _find_spec(id)
+               ^^^^^^^^^^^^^^
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/envs/registration.py", line 527, in _find_spec
+    _check_version_exists(ns, name, version)
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/envs/registration.py", line 391, in _check_version_exists
+    _check_name_exists(ns, name)
+  File "/home/UFAD/tcuevasmestanza/.conda/envs/racing/lib/python3.12/site-packages/gymnasium/envs/registration.py", line 368, in _check_name_exists
+    raise error.NameNotFound(
+gymnasium.error.NameNotFound: Environment `CarRacing_VarFramerate_WO_Time_Pen` doesn't exist. Did you mean: `CarRacing_VarFramerate`?
