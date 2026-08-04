@@ -22,7 +22,7 @@ ent_coef: 0.03
 vf_coef: 0.5
 clip_coef: 0.2
 max_grad_norm: 0.5
-anneal_lr: true
+anneal_lr: false
 norm_adv: true
 clip_vloss: true
 nav_model_path: "experiments/navigation/CarRacing-v3__train__1__1785768450/final.pt"
@@ -35,7 +35,7 @@ max_episode_steps: 2000
 # Decision budget in real samples (episode_frame_count), not physics ticks --
 # comfortably below the 500-tick ceiling so "sample less than every tick" strategies
 # still have room to finish clean before the overrun penalty fires.
-budget: 180
+budget: 90
 
 # Sweep combinations -- training/sweep_adaptive_fps_track_aware_lstm.py builds the
 # Cartesian product across these lists. Calibrated against real post-reformulation
@@ -48,4 +48,4 @@ budget: 180
 # FPS choices (e.g. 50 vs 25); 1.0-2.0 should visibly dominate it.
 sweep:
   # frame_cost: [2.0, 2.1, 2.2, 2.3]
-  frame_cost: [1.7, 1.8, 1.9, 2.0, 2.1, 2.2]
+  frame_cost: [1.7, 1.8, 1.9, 2.0,2.1,2.2]

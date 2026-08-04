@@ -1,0 +1,2 @@
+condition,n_episodes,mean_return,mean_frames_consumed,nav_reward_mean,reached_goal_rate,budget_overrun_rate,time_off_track,fps_mix
+adaptive_final,100,668.69,177.44,887.929,0.95,0.01,0.0684,"fps25=15%,fps50=85%"

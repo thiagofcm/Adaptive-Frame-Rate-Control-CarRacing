@@ -35,7 +35,7 @@ max_episode_steps: 2000
 # Decision budget in real samples (episode_frame_count), not physics ticks --
 # comfortably below the 500-tick ceiling so "sample less than every tick" strategies
 # still have room to finish clean before the overrun penalty fires.
-budget: 180
+budget: 90
 
 # Sweep combinations -- training/sweep_adaptive_fps_track_aware_lstm.py builds the
 # Cartesian product across these lists. Calibrated against real post-reformulation
