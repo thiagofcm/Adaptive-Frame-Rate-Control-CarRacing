@@ -35,6 +35,13 @@ def _arc_length_point(xy, seg_len, target_arc):
     return xy[-1]  # floating-point fallback, shouldn't be reached
 
 
+# Index of cross_track within CautiousVars.get_cautious_var()'s 11-dim return array
+# (utils/cautious_variables.py) -- vx, vy, dist_to_curve, curve_severity_norm,
+# heading_alignment, cross_track, ... -- same convention used elsewhere in the codebase
+# (e.g. analysis/eval_straight_track_fps.py's CROSS_TRACK_IDX).
+CROSS_TRACK_IDX = 5
+
+
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -81,8 +88,17 @@ class NavModel:
     
 class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
     def __init__(self, env, nav_model_path, device, frame_cost=0.0, budget=50, goal_distance=900.0,
-                 goal_reward=150.0):
+                 goal_reward=150.0, use_potential_shaping: bool = False, shaping_gamma: float = 0.99,
+                 potential_lambda: float = 1.0):
         super().__init__(env)
+
+        # Potential-based reward shaping (PBRS) -- off by default, so existing callers
+        # (training script, eval_adaptive_fps_track_aware.py, frame_cost_calibration.py)
+        # see exactly the same reward stream as before unless explicitly opted in.
+        self.use_potential_shaping = use_potential_shaping
+        self.shaping_gamma = shaping_gamma
+        self.potential_lambda = potential_lambda
+        self.prev_potential = 0.0  # properly (re)initialized in reset()
 
         # Variable Framerate Settings:
         self.simulation_fps= FPS
@@ -181,6 +197,7 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
         self.cautious_sensors.reset_track_reading(self.env)
         # dt_ticks=0: first reading of the episode, no prior tick to diff/accumulate against
         self.last_sampled_cautious_obs = self.cautious_sensors.get_cautious_var(self.env, dt_ticks=0)
+        self.prev_potential = self._potential(self.last_sampled_cautious_obs[CROSS_TRACK_IDX])
 
         # Current obs here is the cautious var (11-dim) + 3 scalars
         self.current_obs = self._get_augmented_obs(self.last_sampled_cautious_obs)  # augmented (36866,) for the FPS policy
@@ -207,6 +224,17 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
             cautious_obs,
             np.array([obs_age_ratio, fps_ratio, frame_counter], dtype=np.float32)])
         return aug_obs
+
+    def _potential(self, cross_track):
+        # State-only potential for PBRS: -|cross_track|, maximized (0) at the centerline.
+        # Known limitation, not a bug (flagged during offline calibration): this Phi
+        # cannot distinguish a clean stop near centerline from a fast pass-through
+        # overshoot to the opposite side -- both read as Phi≈0 at the crossing instant.
+        # That produces large, roughly-canceling reward/penalty spikes at oscillation
+        # events (Phi swings toward 0 on the way in, then away from 0 on the way out,
+        # on consecutive ticks), rather than a smooth penalty proportional to how far
+        # off-track the car actually got.
+        return -abs(cross_track)
 
     def step(self, fps_action):
         assert self.navigation_model is not None, \
@@ -314,6 +342,16 @@ class AdaptiveFPS_TrackAware_Wrapper(gym.Wrapper):
         if self.reached_goal:
             terminated = True
             reward = self.goal_reward
+
+        # Potential-based reward shaping (PBRS), added on top of the reward pipeline
+        # above rather than folded into it -- base_reward is exactly what every existing
+        # caller already gets when use_potential_shaping is left at its default (False).
+        base_reward = reward
+        current_cross_track = float(self.last_sampled_cautious_obs[CROSS_TRACK_IDX])
+        next_potential = 0.0 if terminated else self._potential(current_cross_track)
+        shaping_reward = self.shaping_gamma * next_potential - self.prev_potential
+        reward = base_reward + (self.potential_lambda * shaping_reward if self.use_potential_shaping else 0.0)
+        self.prev_potential = next_potential
 
         # Consolidated debug field: which single condition actually ended the episode.
         # reached_goal takes priority since it's the wrapper's own success condition and

@@ -25,7 +25,7 @@ max_grad_norm: 0.5
 anneal_lr: true
 norm_adv: true
 clip_vloss: true
-nav_model_path: "old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt"
+nav_model_path: "runs/CarRacing-v3__train__1__1785768450/agent_step3276800.pt"
 async_envs: true
 # max_episode_steps MUST stay above STATIC_TIMEOUT_TICKS (currently 400 in
 # envs/car_racing_var_fps.py) -- otherwise the outer TimeLimit truncates every
@@ -36,6 +36,14 @@ max_episode_steps: 2000
 # comfortably below the 500-tick ceiling so "sample less than every tick" strategies
 # still have room to finish clean before the overrun penalty fires.
 budget: 180
+# Potential-based reward shaping (PBRS) -- see AdaptiveFPS_TrackAware_Wrapper._potential()
+# / wrappers/adaptive_fps_track_aware_wrapper.py. Fixed (not swept) for this sweep:
+# every frame_cost combination below trains with shaping on and potential_lambda=5.0.
+# shaping_gamma matches gamma above, as required for the shaping to be theoretically
+# reward-neutral in expectation.
+use_potential_shaping: true
+shaping_gamma: 0.99
+potential_lambda: 5.0
 
 # Sweep combinations -- training/sweep_adaptive_fps_track_aware_lstm.py builds the
 # Cartesian product across these lists. Calibrated against real post-reformulation
@@ -48,4 +56,4 @@ budget: 180
 # FPS choices (e.g. 50 vs 25); 1.0-2.0 should visibly dominate it.
 sweep:
   # frame_cost: [2.0, 2.1, 2.2, 2.3]
-  frame_cost: [1.2, 1.4, 1.6, 1.8, 2.0, 2.2]
+  frame_cost: [1.5, 1.6, 1.7, 1.8, 1.9, 2.0]

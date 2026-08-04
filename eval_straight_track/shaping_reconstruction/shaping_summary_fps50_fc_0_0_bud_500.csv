@@ -1,0 +1,2 @@
+fps,gamma,potential_lambda,total_nav_reward,total_frame_cost_paid,total_base_reward,total_shaping_reward,total_reward_with_shaping,shaping_to_nav_reward_ratio,mean_abs_cross_track,max_abs_cross_track
+50,0.99,25.0,259.6973,169.2,90.4973,6.7184,97.2157,2.587,0.28246,0.77581

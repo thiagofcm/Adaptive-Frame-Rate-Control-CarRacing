@@ -44,7 +44,7 @@ torch.set_num_threads(1)
 # and utils package are importable regardless of the caller's cwd.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from eval_adaptive_fps_track_aware import make_eval_env, load_adaptive_agent, FPS_CHOICES, NAV_MODEL_PATH
+from experiments.var_fps.eval_adaptive_fps_track_aware import make_eval_env, load_adaptive_agent, FPS_CHOICES, NAV_MODEL_PATH
 from utils.cautious_variables import CautiousVars
 
 

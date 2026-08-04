@@ -8,22 +8,23 @@ segment -- so the whole evaluated episode never has to navigate a curve. This
 directly tests whether a high sensing rate (FPS) is actually needed on straight
 sections, decoupled entirely from the confound of curve navigation.
 
-frame_cost=0.0 and a generous budget are used throughout -- this experiment is
-about raw driving quality (nav_reward/off-track/cross-track) per FPS, not about
-frame_cost economics (that's what frame_cost_calibration.py already covers).
+frame_cost is configurable via --frame-cost (default 1.8) and a generous budget
+is used throughout -- this experiment is about raw driving quality
+(nav_reward/off-track/cross-track) per FPS, not about frame_cost economics
+(that's what frame_cost_calibration.py already covers).
+
+Everything here is deterministic given (fps, seed), so a single seed per FPS
+is sufficient -- an earlier full run found n=12 vs. n=2 seeds gave identical
+numbers.
 
 Usage:
-  python analysis/eval_straight_track_fps.py --n-seeds 8 --out-dir eval_straight_track
+  python analysis/eval_straight_track_fps.py --frame-cost 1.8 --out-dir eval_straight_track
 """
 import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import argparse
 import csv
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import matplotlib
@@ -40,7 +41,7 @@ from envs.car_racing_var_fps import FPS as RAW_FPS  # 50 -- the base env's own p
 from wrappers.pre_processing import CarRacingPreprocessing
 from wrappers.adaptive_fps_track_aware_wrapper import AdaptiveFPS_TrackAware_Wrapper
 from utils.cautious_variables import OFF_TRACK_WHEEL_THRESHOLD
-from eval_adaptive_fps_track_aware import FPS_CHOICES, NAV_MODEL_PATH
+from experiments.var_fps.eval_adaptive_fps_track_aware import FPS_CHOICES, NAV_MODEL_PATH
 
 STRAIGHT_LENGTH = straight_track_mod.STRAIGHT_LENGTH
 # Strictly less than STRAIGHT_LENGTH so the goal point lands on the SAME straight
@@ -49,12 +50,27 @@ STRAIGHT_LENGTH = straight_track_mod.STRAIGHT_LENGTH
 GOAL_DISTANCE = 400.0
 CROSS_TRACK_IDX = 5  # augmented-obs layout: [...11 cautious dims (index 5 = cross_track)..., obs_age_ratio, fps_ratio, frame_counter]
 
+# augmented-obs column names, in order -- see CautiousVars.get_cautious_var()
+# (utils/cautious_variables.py) for the first 11, and
+# AdaptiveFPS_TrackAware_Wrapper's aug_obs concatenation for the trailing 3.
+OBS_COLUMNS = [
+    "vx", "vy", "dist_to_curve", "curve_severity_norm", "heading_alignment",
+    "cross_track", "cross_track_rate_norm", "off_track", "time_off_track_norm",
+    "episode_completion", "curves_passed_norm", "obs_age_ratio", "fps_ratio",
+    "frame_counter",
+]
 
-def make_straight_env(nav_model_path, budget, max_episode_steps):
+
+def fmt_tag(x):
+    """Filename-safe formatting matching this file's existing fc_1_8-style tags."""
+    return str(x).replace(".", "_")
+
+
+def make_straight_env(nav_model_path, budget, max_episode_steps, frame_cost):
     env = gym.make("CarRacing_StraightTrack", continuous=False, render_mode="rgb_array")
     env = CarRacingPreprocessing(env, skip_frames=4, stack_frames=4)
     env = AdaptiveFPS_TrackAware_Wrapper(env, nav_model_path, device="cpu",
-                                          frame_cost=0.0, budget=budget,
+                                          frame_cost=frame_cost, budget=budget,
                                           goal_distance=GOAL_DISTANCE,
                                           # This experiment is about raw driving quality --
                                           # the lump-sum goal bonus would otherwise dominate
@@ -64,8 +80,8 @@ def make_straight_env(nav_model_path, budget, max_episode_steps):
     return env
 
 
-def run_episode(fps, seed, nav_model_path, budget, max_episode_steps):
-    env = make_straight_env(nav_model_path, budget, max_episode_steps)
+def run_episode(fps, seed, nav_model_path, budget, max_episode_steps, frame_cost):
+    env = make_straight_env(nav_model_path, budget, max_episode_steps, frame_cost)
     obs, _ = env.reset(seed=seed)
     action = FPS_CHOICES.index(fps)
     # env.env is the AdaptiveFPS_TrackAware_Wrapper instance (env is TimeLimit(...))
@@ -76,6 +92,7 @@ def run_episode(fps, seed, nav_model_path, budget, max_episode_steps):
 
     positions, rewards, cum_rewards, in_curve_flags, cross_track_vals = [], [], [], [], []
     timesteps = []  # raw CarRacing_VarFramerate physics-tick count, see module docstring
+    pertick_rows = []
     off_track_ticks = 0
     cum = 0.0
     nav_reward_cum = 0.0
@@ -91,7 +108,8 @@ def run_episode(fps, seed, nav_model_path, budget, max_episode_steps):
         positions.append((x, y))
         rewards.append(r)
         cum_rewards.append(cum)
-        in_curve_flags.append(bool(env.unwrapped.in_curve))
+        in_curve = bool(env.unwrapped.in_curve)
+        in_curve_flags.append(in_curve)
         off_wheels = sum(len(w.tiles) == 0 for w in env.unwrapped.car.wheels)
         if off_wheels >= OFF_TRACK_WHEEL_THRESHOLD:
             off_track_ticks += 1
@@ -100,7 +118,11 @@ def run_episode(fps, seed, nav_model_path, budget, max_episode_steps):
         # sim time (self.t += 1.0/FPS every raw physics tick, car_racing_var_fps.py:617),
         # so this recovers the exact raw-tick count regardless of skip_frames grouping
         # (including a possibly-shorter final group if the episode ends mid-group).
-        timesteps.append(round(env.unwrapped.t * RAW_FPS))
+        timestep = round(env.unwrapped.t * RAW_FPS)
+        timesteps.append(timestep)
+        pertick_rows.append(
+            [tick, timestep] + [float(v) for v in obs] + [float(r), float(info["nav_reward"]), cum, in_curve]
+        )
         done = term or trunc
 
     env.close()
@@ -111,6 +133,7 @@ def run_episode(fps, seed, nav_model_path, budget, max_episode_steps):
         "cum_rewards": cum_rewards,
         "in_curve_flags": in_curve_flags,
         "timesteps": timesteps,
+        "pertick_rows": pertick_rows,
         "reached_goal": bool(info.get("reached_goal", False)),
         "total_reward": cum,
         "total_nav_reward": nav_reward_cum,
@@ -121,11 +144,6 @@ def run_episode(fps, seed, nav_model_path, budget, max_episode_steps):
         "goal_xy": goal_xy,
         "goal_radius": goal_radius,
     }
-
-
-def _worker(job):
-    fps, seed, nav_model_path, budget, max_episode_steps = job
-    return run_episode(fps, seed, nav_model_path, budget, max_episode_steps)
 
 
 def plot_trajectory(track, ep, save_path, title):
@@ -184,83 +202,87 @@ def plot_comparison(episodes_by_fps, save_path):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--nav-model-path", default=NAV_MODEL_PATH)
-    p.add_argument("--n-seeds", type=int, default=8)
     p.add_argument("--seed-start", type=int, default=300000,
-                    help="distinct from other analyses' seed ranges used this session")
+                    help="distinct from other analyses' seed ranges used this session; "
+                         "single fixed seed used for every FPS (results are deterministic)")
     p.add_argument("--budget", type=float, default=500,
                     help="generous on purpose -- this experiment is about driving quality, "
                          "not frame_cost/budget economics, so budget-overrun shouldn't fire")
     p.add_argument("--max-episode-steps", type=int, default=500)
-    p.add_argument("--workers", type=int, default=40)
+    p.add_argument("--frame-cost", type=float, default=1.8)
     p.add_argument("--out-dir", default="eval_straight_track")
     args = p.parse_args()
 
-    seeds = list(range(args.seed_start, args.seed_start + args.n_seeds))
-    jobs = [(fps, seed, args.nav_model_path, args.budget, args.max_episode_steps)
-            for fps in FPS_CHOICES for seed in seeds]
+    seed = args.seed_start
+    fc_tag = fmt_tag(args.frame_cost)
+    bud_tag = fmt_tag(args.budget)
 
-    print(f"[eval_straight_track] running {len(jobs)} episodes across {args.workers} workers...")
-    grouped = {fps: [] for fps in FPS_CHOICES}
-    with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(_worker, job) for job in jobs]
-        done = 0
-        for fut in as_completed(futures):
-            ep = fut.result()
-            grouped[ep["fps"]].append(ep)
-            done += 1
-            if done % 10 == 0 or done == len(jobs):
-                print(f"[eval_straight_track] {done}/{len(jobs)} episodes done")
-
-    # sort each fps's episodes by seed for reproducible "representative episode" (seed[0]) picks
+    print(f"[eval_straight_track] running {len(FPS_CHOICES)} episodes (one per FPS, seed={seed})...")
+    grouped = {}
     for fps in FPS_CHOICES:
-        grouped[fps].sort(key=lambda e: e["seed"])
+        grouped[fps] = run_episode(fps, seed, args.nav_model_path, args.budget,
+                                    args.max_episode_steps, args.frame_cost)
+        print(f"[eval_straight_track] fps={fps} done")
+
+    os.makedirs(args.out_dir, exist_ok=True)
 
     # --- Mandatory verification: every logged tick must be geometrically off any curve ---
     print("\n=== Mandatory verification: episodes must never touch a curve ===")
     all_ok = True
     for fps in FPS_CHOICES:
-        for ep in grouped[fps]:
-            if any(ep["in_curve_flags"]):
-                all_ok = False
-                print(f"  [FAIL] fps={fps} seed={ep['seed']}: in_curve was True at some tick "
-                      f"-- STRAIGHT_LENGTH/GOAL_DISTANCE need adjusting, results below are NOT trustworthy")
-            xs = np.array([pos[0] for pos in ep["positions"]])
-            if xs.min() < -STRAIGHT_LENGTH / 2 - 5 or xs.max() > STRAIGHT_LENGTH / 2 + 5:
-                all_ok = False
-                print(f"  [FAIL] fps={fps} seed={ep['seed']}: x-position left the straight's "
-                      f"expected range (x in [{xs.min():.1f}, {xs.max():.1f}])")
+        ep = grouped[fps]
+        if any(ep["in_curve_flags"]):
+            all_ok = False
+            print(f"  [FAIL] fps={fps} seed={ep['seed']}: in_curve was True at some tick "
+                  f"-- STRAIGHT_LENGTH/GOAL_DISTANCE need adjusting, results below are NOT trustworthy")
+        xs = np.array([pos[0] for pos in ep["positions"]])
+        if xs.min() < -STRAIGHT_LENGTH / 2 - 5 or xs.max() > STRAIGHT_LENGTH / 2 + 5:
+            all_ok = False
+            print(f"  [FAIL] fps={fps} seed={ep['seed']}: x-position left the straight's "
+                  f"expected range (x in [{xs.min():.1f}, {xs.max():.1f}])")
     print("  all episodes verified on-straight" if all_ok else "  SOME EPISODES FAILED VERIFICATION -- see above")
+
+    # --- Per-tick CSV: one file per FPS, every augmented-obs field plus reward/context ---
+    pertick_header = (["tick", "timestep"] + OBS_COLUMNS
+                       + ["reward", "nav_reward", "cum_reward", "in_curve"])
+    for fps in FPS_CHOICES:
+        ep = grouped[fps]
+        pertick_path = os.path.join(args.out_dir, f"pertick_fc{fc_tag}_bud{bud_tag}_fps{fps}.csv")
+        with open(pertick_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(pertick_header)
+            writer.writerows(ep["pertick_rows"])
+        print(f"wrote {pertick_path}")
 
     # --- Aggregate table ---
     # reward vs. nav_reward: identical every tick except the tick reached_goal fires,
     # where the wrapper overrides reward=150 outright (discarding nav_reward-frame_penalty
-    # for that tick) -- see AdaptiveFPS_TrackAware_Wrapper.step(). So at frame_cost=0.0 with
-    # a budget large enough to never overrun, total_reward and total_nav_reward should match
-    # exactly for episodes that never reach the goal, and differ by exactly
-    # (150 - that tick's true nav_reward) for episodes that do.
-    print("\n=== Per-FPS aggregate results (pure straight track, frame_cost=0.0, goal_reward=0.0) ===")
-    print(f"{'fps':>4} {'n':>3} {'mean_reward':>12} {'mean_nav_reward':>16} {'reward-nav_reward':>18} "
-          f"{'reached_goal':>13} {'off_track_rate':>15} {'mean|cross_track|':>18} {'mean_ticks':>11} {'mean_timesteps':>15}")
-    os.makedirs(args.out_dir, exist_ok=True)
-    csv_path = os.path.join(args.out_dir, "straight_track_fps_comparison_2.csv")
+    # for that tick) -- see AdaptiveFPS_TrackAware_Wrapper.step(). So with a budget large
+    # enough to never overrun, total_reward and total_nav_reward should match exactly for
+    # episodes that never reach the goal, and differ by exactly (150 - that tick's true
+    # nav_reward) for episodes that do.
+    print(f"\n=== Per-FPS results (pure straight track, frame_cost={args.frame_cost}, goal_reward=0.0) ===")
+    print(f"{'fps':>4} {'reward':>12} {'nav_reward':>16} {'reward-nav_reward':>18} "
+          f"{'reached_goal':>13} {'off_track_rate':>15} {'mean|cross_track|':>18} {'ticks':>11} {'timesteps':>15}")
+    csv_path = os.path.join(args.out_dir, f"straight_track_fps_comparison_fc_{fc_tag}.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["fps", "n_episodes", "mean_reward", "mean_nav_reward", "reward_minus_nav_reward",
                           "reached_goal_rate", "off_track_rate", "mean_cross_track_abs", "mean_ticks",
                           "mean_timesteps"])
         for fps in FPS_CHOICES:
-            eps = grouped[fps]
-            mean_reward = np.mean([e["total_reward"] for e in eps])
-            mean_nav_reward = np.mean([e["total_nav_reward"] for e in eps])
-            reached_rate = np.mean([e["reached_goal"] for e in eps])
-            off_track_rate = np.mean([e["off_track_rate"] for e in eps])
-            mean_cross = np.mean([e["mean_cross_track_abs"] for e in eps])
-            mean_ticks = np.mean([e["tick_count"] for e in eps])
-            mean_timesteps = np.mean([e["total_timesteps"] for e in eps])
-            print(f"{fps:>4} {len(eps):>3} {mean_reward:>12.2f} {mean_nav_reward:>16.2f} "
+            ep = grouped[fps]
+            mean_reward = ep["total_reward"]
+            mean_nav_reward = ep["total_nav_reward"]
+            reached_rate = float(ep["reached_goal"])
+            off_track_rate = ep["off_track_rate"]
+            mean_cross = ep["mean_cross_track_abs"]
+            mean_ticks = ep["tick_count"]
+            mean_timesteps = ep["total_timesteps"]
+            print(f"{fps:>4} {mean_reward:>12.2f} {mean_nav_reward:>16.2f} "
                   f"{mean_reward - mean_nav_reward:>18.2f} {reached_rate:>13.0%} "
                   f"{off_track_rate:>15.2%} {mean_cross:>18.4f} {mean_ticks:>11.1f} {mean_timesteps:>15.1f}")
-            writer.writerow([fps, len(eps), round(float(mean_reward), 3), round(float(mean_nav_reward), 3),
+            writer.writerow([fps, 1, round(float(mean_reward), 3), round(float(mean_nav_reward), 3),
                               round(float(mean_reward - mean_nav_reward), 3), round(float(reached_rate), 4),
                               round(float(off_track_rate), 4), round(float(mean_cross), 4),
                               round(float(mean_ticks), 1), round(float(mean_timesteps), 1)])
@@ -268,24 +290,22 @@ def main():
 
     # --- Plots ---
     sample_env = gym.make("CarRacing_StraightTrack", continuous=False, render_mode="rgb_array")
-    sample_env.reset(seed=seeds[0])
+    sample_env.reset(seed=seed)
     track = np.asarray(sample_env.unwrapped.track, dtype=np.float32)
     sample_env.close()
 
     plot_dir = os.path.join(args.out_dir, "plots")
     os.makedirs(plot_dir, exist_ok=True)
-    representative = {}
     for fps in FPS_CHOICES:
-        ep0 = grouped[fps][0]  # seed[0], deterministic representative episode
-        representative[fps] = ep0
-        plot_trajectory(track, ep0, os.path.join(plot_dir, f"plot_straight_fixedfps{fps}_seed{ep0['seed']}_2.png"),
-                         title=f"fixed FPS={fps}  seed={ep0['seed']}  reward={ep0['total_reward']:.0f}  "
-                               f"timesteps={ep0['total_timesteps']}")
-        plot_reward_curve(ep0, os.path.join(plot_dir, f"reward_curve_fixedfps{fps}_seed{ep0['seed']}_2.png"),
+        ep = grouped[fps]
+        plot_trajectory(track, ep, os.path.join(plot_dir, f"plot_straight_fixedfps{fps}_seed{ep['seed']}_fc_{fc_tag}.png"),
+                         title=f"fixed FPS={fps}  seed={ep['seed']}  reward={ep['total_reward']:.0f}  "
+                               f"timesteps={ep['total_timesteps']}")
+        plot_reward_curve(ep, os.path.join(plot_dir, f"reward_curve_fixedfps{fps}_seed{ep['seed']}_fc_{fc_tag}.png"),
                            title=f"fixed FPS={fps}  cumulative reward vs. raw timestep")
         print(f"saved plots for fps={fps} -> {plot_dir}")
 
-    plot_comparison(representative, os.path.join(plot_dir, "reward_comparison_all_fps.png"))
+    plot_comparison(grouped, os.path.join(plot_dir, "reward_comparison_all_fps.png"))
     print(f"saved comparison plot -> {os.path.join(plot_dir, 'reward_comparison_all_fps.png')}")
 
 

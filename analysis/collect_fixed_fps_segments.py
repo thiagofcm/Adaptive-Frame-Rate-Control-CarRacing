@@ -38,7 +38,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from eval_adaptive_fps_track_aware import make_eval_env, FPS_CHOICES, NAV_MODEL_PATH
+from experiments.var_fps.eval_adaptive_fps_track_aware import make_eval_env, FPS_CHOICES, NAV_MODEL_PATH
 from utils.cautious_variables import CautiousVars, OFF_TRACK_WHEEL_THRESHOLD
 
 CROSS_TRACK_IDX = 5  # CautiousVars.get_cautious_var() layout: see cautious_variables.py
