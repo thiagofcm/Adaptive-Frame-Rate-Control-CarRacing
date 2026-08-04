@@ -1,0 +1,42 @@
+# config for experiments/navigation_vector/train_nav_vector.py -- the plain-MLP
+# CarRacing navigation policy trained directly on the 11-dim cautious-variables
+# vector (utils/cautious_variables.py) via CautiousVarsWrapper, on the
+# CarRacing_RandomSpawn env (envs/car_racing_random_spawn.py: random track spawn
+# point each episode, optional constant-velocity physics override). No CNN, no
+# image preprocessing, no LSTM.
+#
+# Same schema/values as train_nav_vector.py's Args dataclass defaults. Run with:
+#   python -m experiments.navigation_vector.train_nav_vector --config config/train_nav_vector.yaml
+# Any field here can still be overridden from the CLI, e.g.:
+#   ... --config config/train_nav_vector.yaml --constant-velocity --num-envs 8
+seed: 1
+torch_deterministic: true
+cuda: true
+track: false
+wandb_project_name: cleanRL
+capture_video: false
+
+env_id: CarRacing_RandomSpawn
+total_timesteps: 10_000_000
+learning_rate: 0.0001
+num_envs: 64
+num_steps: 512
+anneal_lr: true
+gamma: 0.99
+gae_lambda: 0.95
+num_minibatches: 32
+update_epochs: 10
+norm_adv: true
+clip_coef: 0.2
+clip_vloss: true
+ent_coef: 0.01
+vf_coef: 0.5
+max_grad_norm: 0.5
+
+max_episode_steps: 2000
+resume_path: null
+
+constant_velocity: false
+constant_speed_value: 30.0
+
+async_envs: true
