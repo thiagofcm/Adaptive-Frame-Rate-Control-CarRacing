@@ -5,6 +5,7 @@
 *.jpg
 *.jpeg
 *.gif
+*.log
 
 # TensorBoard
 **/events.out.tfevents.*
