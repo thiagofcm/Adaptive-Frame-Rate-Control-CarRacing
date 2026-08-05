@@ -75,7 +75,7 @@ STATIC_TIMEOUT_TICKS = 400
 # an independent, self-contained calibration from CautiousVars' curve_thresh (which is
 # a curvature RATE in rad/world-unit, not a raw per-segment angle), so the two are not
 # expected to draw region boundaries at exactly the same nodes.
-CURVE_TILE_TURN_THRESHOLD = 0.04
+CURVE_TILE_TURN_THRESHOLD = 0.05
 # Reward bonus paid once, on cleanly exiting a curve region (no off-track/wrong-direction
 # event while inside it) -- comparable to a handful of tiles' worth of +1000/N progress
 # reward, without dominating it or the -100 terminal penalties.
@@ -633,8 +633,8 @@ class CarRacing_VarFramerate(CarRacing):
             # applied per physics tick on top of the existing -0.1/tick baseline --
             # an off-track tick costs -0.2 total instead of a separately-scaled term.
             off_track_wheels = sum(len(w.tiles) == 0 for w in self.car.wheels)
-            # if off_track_wheels >= 3:
-            #     self.reward -= 0.1
+            if off_track_wheels >= 3:
+                self.reward -= 0.1
 
             step_reward = self.reward - self.prev_reward
             self.prev_reward = self.reward
@@ -643,8 +643,6 @@ class CarRacing_VarFramerate(CarRacing):
             # stalled-car check below, applied to consecutive off-track ticks instead
             # of consecutive low-speed ticks -- a car that's been off-track (>=3
             # wheels) this long isn't coming back on its own either.
-            
-            # TERMINATION CONDITION: OUT OF TRACK 
             if off_track_wheels >= 3:
                 self.off_track_ticks += 1
             else:
@@ -653,8 +651,6 @@ class CarRacing_VarFramerate(CarRacing):
                 terminated = True
                 info["off_track_timeout"] = True
                 step_reward = -100
-
-            # TERMINATION CONDITION: FINISHED LAP
             if self.tile_visited_count == len(self.track) or self.new_lap:
                 # Termination due to finishing lap
                 terminated = True
@@ -665,7 +661,6 @@ class CarRacing_VarFramerate(CarRacing):
                 info["lap_finished"] = False
                 step_reward = -100
 
-            # TERMINATION CONDITION: WRONG DIRECTION
             # Wrong-direction termination: find the tile currently under any wheel
             # (skip the check if fully off-track -- that's already penalized above,
             # and there's no tile to read a direction from anyway).
@@ -684,29 +679,25 @@ class CarRacing_VarFramerate(CarRacing):
                     step_reward = -100
                     wrong_direction_now = True
 
-            # CURVED PASSED BONUS
-
             # Curves-passed tracking: entering/exiting a curve region (same tile
             # lookup as above, skipped while fully off-track for the same reason).
             # "Clean" means no off-track or wrong-direction event fired while inside
             # the region -- only a clean exit earns the bonus and counts toward
             # curves_passed_count (read by CautiousVars for the observation feature).
-            # if current_tile_idx is not None:
-            #     is_curve_now = self._is_curve_tile(current_tile_idx)
-            #     if is_curve_now and not self.in_curve:
-            #         self.in_curve = True
-            #         self.curve_clean = True
-            #     elif not is_curve_now and self.in_curve:
-            #         self.in_curve = False
-            #         if self.curve_clean:
-            #             self.curves_passed_count += 1
-            #             step_reward += CURVE_PASSED_BONUS
-            #             info["curve_passed"] = True
-            #     if self.in_curve and (off_track_wheels >= 2 or wrong_direction_now):
-            #         self.curve_clean = False
+            if current_tile_idx is not None:
+                is_curve_now = self._is_curve_tile(current_tile_idx)
+                if is_curve_now and not self.in_curve:
+                    self.in_curve = True
+                    self.curve_clean = True
+                elif not is_curve_now and self.in_curve:
+                    self.in_curve = False
+                    if self.curve_clean:
+                        self.curves_passed_count += 1
+                        step_reward += CURVE_PASSED_BONUS
+                        info["curve_passed"] = True
+                if self.in_curve and (off_track_wheels >= 3 or wrong_direction_now):
+                    self.curve_clean = False
 
-            # TERMINATION CONDITION: STALLED CAR
-            
             # Stalled-car termination: note this counter also accumulates through
             # CarRacingPreprocessing's 50-tick no-op warmup at the start of every
             # episode (action=0 there, so the car is typically still stationary) --

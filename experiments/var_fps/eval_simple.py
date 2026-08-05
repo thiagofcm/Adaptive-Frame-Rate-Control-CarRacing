@@ -58,7 +58,7 @@ ACTION_SPACE_LENGTH = 5
 LSTM_HIDDEN_SIZE    = 64
 FPS_TO_ACTION       = {1: 0, 5: 1, 10: 2, 25: 3, 50: 4}
 
-N_EPISODES        = 1000
+N_EPISODES        = 100
 N_RUNS            = 1
 RUN_SEED          = 42
 MAX_EVAL_WORKERS  = 16

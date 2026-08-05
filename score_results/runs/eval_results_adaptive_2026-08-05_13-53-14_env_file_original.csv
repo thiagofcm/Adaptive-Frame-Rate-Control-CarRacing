@@ -1,0 +1,2 @@
+model,frame_cost,budget,n_runs,n_episodes,reward_mean,reward_std,nav_reward_mean,nav_reward_std,frames_mean,frames_std,success_pct_mean,success_pct_std,time_off_track_mean,time_off_track_std,mean_speed_at_curves,std_speed_at_curves,n_curves,mean_speed_at_straights,std_speed_at_straights,n_straights
+runs/adaptive_fps_track_aware_lstm/CarRacing_VarFramerate_fc_1.8_bud_180_22-07-19-18-35/final.pt,1.8,180.0,1,100,680.1972,197.1006,887.0841,167.8575,173.64,21.83,91.00,28.62,0.0757,0.0758,59.4240,13.0830,789,56.5864,14.9309,783

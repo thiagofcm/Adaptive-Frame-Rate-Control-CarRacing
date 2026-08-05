@@ -19,7 +19,7 @@ from experiments.navigation.train import Agent, CarRacingPreprocessing
 from utils.cautious_variables import CautiousVars, OFF_TRACK_WHEEL_THRESHOLD
 
 SIM_FPS = 50
-FPS_BASELINES = [1, 5, 10, 25, 50]
+FPS_BASELINES = [50]
 
 # Batch-eval seed group -- deliberately a plain constant, not a CLI flag, so results
 # stay reproducible without needing a flag passed consistently between invocations.
