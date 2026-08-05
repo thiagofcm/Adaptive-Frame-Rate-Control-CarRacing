@@ -1,26 +1,3 @@
-"""
-eval_adaptive_fps_track_aware.py
-
-Evaluator for the AdaptiveFPS_TrackAware_Wrapper pipeline (env: CarRacing_VarFramerate,
-wrapper: wrappers/adaptive_fps_track_aware_wrapper.py). Two modes:
-
-  --fixed-fps {1,5,10,25,50}   run the frozen NavModel at a single, fixed FPS
-  --adaptive-ckpt PATH         run a trained FPS-selection policy checkpoint
-                                (train_adaptive_fps_track_aware_lstm.py's Agent)
-
-wrapper.step() is one *physics tick* (not a decision window), and the FPS action
-is only actually consumed by the wrapper at sampling instants -- in between, the
-11-dim cautious-var block of the observation is held stale (unchanged) rather than
-recomputed. At --fixed-fps 1 the vast majority of on-screen ticks will show a
-"STALE" cautious reading, by design -- that's the sensing-frequency effect this
-whole pipeline is about, not a bug in this eval script.
-
-Freshness is read from info["episode_frame_count"]: it only increments on ticks
-where the wrapper actually sampled a new observation, so comparing it to the
-previous tick's value is a reliable fresh/stale signal from outside the wrapper.
-
-Reference/pattern followed: old/experiments/highest_fps_cautious/eval_highest.py
-"""
 import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 # Each --workers subprocess (run_metrics_mode) runs a single episode's
@@ -51,11 +28,11 @@ from matplotlib.lines import Line2D
 import envs.car_racing_var_fps  # noqa: F401 -- registers "CarRacing_VarFramerate"
 from wrappers.pre_processing import CarRacingPreprocessing
 from wrappers.adaptive_fps_track_aware_wrapper import AdaptiveFPS_TrackAware_Wrapper
-from experiments.var_fps.train_adaptive_fps_track_aware_lstm import Agent as AdaptiveAgent
+from experiments.training.train_adaptive_fps_track_aware_lstm import Agent as AdaptiveAgent
 from utils.cautious_variables import OFF_TRACK_WHEEL_THRESHOLD
 
 FPS_CHOICES = [1, 5, 10, 25, 50]
-NAV_MODEL_PATH = "experiments/navigation/CarRacing-v3__ppo__1__1781901069/final.pt"
+NAV_MODEL_PATH = "runs/CarRacing-v3__train__1__1785768450/agent_step3276800.pt"
 #NAV_MODEL_PATH = "old/experiments/navigation/runs/CarRacing-v3__ppo__1__1781901069/final.pt"
 
 # --n-episodes (batch metrics) mode config -- deliberately plain constants, not
@@ -75,27 +52,11 @@ CAUTIOUS_LABELS = [
     "episode_completion", "curves_passed",
 ]
 
-# Must match the 11-dim layout returned by CautiousVars.get_cautious_var() -- note
-# frame_counter is NOT in here, it's in the wrapper's augmented block (last 3 obs dims).
-CAUTIOUS_LABELS = [
-    "vx", "vy", "dist_to_curve", "curve_severity", "heading_alignment", "cross_track",
-    "cross_track_rate", "off_track", "time_off_track",
-    "episode_completion", "curves_passed",
-]
-
-
 def make_eval_env(env_id, nav_model_path, frame_cost, budget, max_episode_steps):
     env = gym.make(env_id, continuous=False, render_mode="rgb_array")
     while isinstance(env, TimeLimit):          # strip any built-in TimeLimit
         env = env.env
     env = CarRacingPreprocessing(env, skip_frames=4, stack_frames=4)
-    # NavModel stays on CPU regardless of --device: single-sample inference every
-    # physics tick is dominated by call overhead, not compute, so CPU is faster here.
-    # NavModel.__init__ prints "Navigation Model loaded on {device}" -- harmless for
-    # a single interactive run, just noise once this fires once per episode in
-    # --n-episodes mode (up to hundreds of times across workers). Suppressed here
-    # rather than in the wrapper, which other callers (training script,
-    # frame_cost_calibration.py) may still want it from.
     with open(os.devnull, "w") as _devnull, contextlib.redirect_stdout(_devnull):
         env = AdaptiveFPS_TrackAware_Wrapper(env, nav_model_path, device="cpu",
                                               frame_cost=frame_cost, budget=budget)
